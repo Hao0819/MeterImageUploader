@@ -3,6 +3,6 @@
   "compilerOptions": {
     "types": ["jest"]
   },
-  "include": ["**/*.ts", "**/*.tsx"],
+  "include": ["**/*.ts", "**/*.tsx", "src/screens/SendScreen.js", "src/screens/BleScannerScreen.js", "src/screens/CameraScreen.js", "src/screens/PhaseSelectScreen.js", "src/screens/SourceSelectScreen.js"],
   "exclude": ["**/node_modules", "**/Pods"]
 }
