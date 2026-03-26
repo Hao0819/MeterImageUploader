@@ -1,14 +1,17 @@
+// src/screens/CameraScreen.jsx
 import React, { useRef, useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, SafeAreaView } from 'react-native';
 import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 import ImageCropPicker from 'react-native-image-crop-picker';
-import { ASSET_W, ASSET_H } from '../utils/ImageConverter';
-
-const GUIDE_W = ASSET_W * 3;
-const GUIDE_H = ASSET_H * 3;
+import { getDimensions } from '../utils/ImageConverter';
 
 export default function CameraScreen({ navigation, route }) {
-    const { device: bleDevice, deviceName, phase } = route.params;
+    const { device: bleDevice, deviceName, phase, imageType } = route.params;
+    const { w, h } = getDimensions(imageType);
+
+    const GUIDE_W = w * 3;
+    const GUIDE_H = h * 3;
+
     const cam = useRef(null);
     const device = useCameraDevice('back');
     const { hasPermission, requestPermission } = useCameraPermission();
@@ -27,9 +30,8 @@ export default function CameraScreen({ navigation, route }) {
 
             const cropped = await ImageCropPicker.openCropper({
                 path: uri,
-                width: ASSET_W,
-                height: ASSET_H,
-                cropperToolbarTitle: `Crop to ${ASSET_W}×${ASSET_H}`,
+                width: w, height: h,
+                cropperToolbarTitle: `Crop to ${w}×${h}`,
                 cropperActiveWidgetColor: '#16a34a',
                 cropperToolbarColor: '#ffffff',
                 cropperStatusBarColor: '#f8fafc',
@@ -38,9 +40,7 @@ export default function CameraScreen({ navigation, route }) {
             });
 
             navigation.navigate('CropSend', {
-                device: bleDevice,
-                deviceName,
-                phase,
+                device: bleDevice, deviceName, phase, imageType,
                 imageUri: cropped.path,
             });
         } catch (e) {
@@ -53,21 +53,17 @@ export default function CameraScreen({ navigation, route }) {
     const gallery = async () => {
         try {
             const img = await ImageCropPicker.openPicker({
-                width: ASSET_W,
-                height: ASSET_H,
+                width: w, height: h,
                 cropping: true,
-                cropperToolbarTitle: `Crop to ${ASSET_W}×${ASSET_H}`,
+                cropperToolbarTitle: `Crop to ${w}×${h}`,
                 cropperActiveWidgetColor: '#16a34a',
                 cropperToolbarColor: '#ffffff',
                 cropperStatusBarColor: '#f8fafc',
                 cropperToolbarWidgetColor: '#0f172a',
                 compressImageQuality: 1,
             });
-
             navigation.navigate('CropSend', {
-                device: bleDevice,
-                deviceName,
-                phase,
+                device: bleDevice, deviceName, phase, imageType,
                 imageUri: img.path,
             });
         } catch (e) {
@@ -110,11 +106,9 @@ export default function CameraScreen({ navigation, route }) {
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.topBtn}>
                     <Text style={styles.topBtnTxt}>✕</Text>
                 </TouchableOpacity>
-
                 <View style={styles.topTitlePill}>
-                    <Text style={styles.topTitle}>{ASSET_W}×{ASSET_H}</Text>
+                    <Text style={styles.topTitle}>{w}×{h}</Text>
                 </View>
-
                 <View style={{ width: 44 }} />
             </SafeAreaView>
 
@@ -139,15 +133,12 @@ export default function CameraScreen({ navigation, route }) {
                 <TouchableOpacity style={styles.galleryBtn} onPress={gallery}>
                     <Text style={styles.galleryTxt}>Gallery</Text>
                 </TouchableOpacity>
-
                 <TouchableOpacity
                     style={[styles.shutter, busy && styles.shutterBusy]}
-                    onPress={shoot}
-                    disabled={busy}
+                    onPress={shoot} disabled={busy}
                 >
                     <View style={[styles.shutterInner, busy && styles.shutterInnerBusy]} />
                 </TouchableOpacity>
-
                 <View style={{ width: 72 }} />
             </SafeAreaView>
         </View>
@@ -156,163 +147,55 @@ export default function CameraScreen({ navigation, route }) {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8fafc' },
-
     center: {
-        flex: 1,
-        backgroundColor: '#f8fafc',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
+        flex: 1, backgroundColor: '#f8fafc',
+        alignItems: 'center', justifyContent: 'center', padding: 24,
     },
     centerCard: {
-        width: '100%',
-        maxWidth: 420,
-        backgroundColor: '#ffffff',
-        borderRadius: 18,
-        padding: 24,
-        borderWidth: 1,
-        borderColor: '#e2e8f0',
-        shadowColor: '#000',
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-        shadowOffset: { width: 0, height: 3 },
-        elevation: 2,
+        width: '100%', maxWidth: 420, backgroundColor: '#ffffff',
+        borderRadius: 18, padding: 24, borderWidth: 1, borderColor: '#e2e8f0',
+        shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10,
+        shadowOffset: { width: 0, height: 3 }, elevation: 2,
     },
-    permTitle: {
-        fontSize: 20,
-        fontWeight: '700',
-        color: '#0f172a',
-        marginBottom: 8,
-        textAlign: 'center',
-    },
-    permText: {
-        color: '#64748b',
-        fontSize: 14,
-        lineHeight: 21,
-        textAlign: 'center',
-        marginBottom: 18,
-    },
-    permBtn: {
-        backgroundColor: '#16a34a',
-        paddingHorizontal: 24,
-        paddingVertical: 12,
-        borderRadius: 12,
-        alignSelf: 'center',
-    },
-    permBtnText: {
-        color: '#ffffff',
-        fontWeight: '700',
-    },
-
+    permTitle: { fontSize: 20, fontWeight: '700', color: '#0f172a', marginBottom: 8, textAlign: 'center' },
+    permText: { color: '#64748b', fontSize: 14, lineHeight: 21, textAlign: 'center', marginBottom: 18 },
+    permBtn: { backgroundColor: '#16a34a', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, alignSelf: 'center' },
+    permBtnText: { color: '#ffffff', fontWeight: '700' },
     topBar: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 20,
-        paddingVertical: 12,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: 20, paddingVertical: 12,
     },
     topBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(255,255,255,0.94)',
-        borderWidth: 1,
-        borderColor: '#e2e8f0',
+        width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: '#e2e8f0',
     },
-    topBtnTxt: {
-        color: '#0f172a',
-        fontSize: 20,
-        fontWeight: '600',
-    },
+    topBtnTxt: { color: '#0f172a', fontSize: 20, fontWeight: '600' },
     topTitlePill: {
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.94)',
-        borderWidth: 1,
-        borderColor: '#e2e8f0',
+        paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999,
+        backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: '#e2e8f0',
     },
-    topTitle: {
-        color: '#0f172a',
-        fontSize: 13,
-        fontWeight: '700',
-    },
-
-    overlayTop: {
-        flex: 1,
-        backgroundColor: 'rgba(15,23,42,0.34)',
-        width: '100%',
-    },
-    overlayMid: {
-        flexDirection: 'row',
-        height: GUIDE_H,
-    },
-    overlaySide: {
-        flex: 1,
-        backgroundColor: 'rgba(15,23,42,0.34)',
-    },
-    guide: {
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.65)',
-    },
-    corner: {
-        position: 'absolute',
-        width: 22,
-        height: 22,
-        borderColor: '#22c55e',
-        borderWidth: 3,
-    },
-    overlayBottom: {
-        flex: 1,
-        backgroundColor: 'rgba(15,23,42,0.34)',
-        width: '100%',
-    },
-
+    topTitle: { color: '#0f172a', fontSize: 13, fontWeight: '700' },
+    overlayTop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.34)', width: '100%' },
+    overlayMid: { flexDirection: 'row' },
+    overlaySide: { flex: 1, backgroundColor: 'rgba(15,23,42,0.34)' },
+    guide: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.65)' },
+    corner: { position: 'absolute', width: 22, height: 22, borderColor: '#22c55e', borderWidth: 3 },
+    overlayBottom: { flex: 1, backgroundColor: 'rgba(15,23,42,0.34)', width: '100%' },
     bottomBar: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingHorizontal: 28,
-        paddingBottom: 24,
-        paddingTop: 12,
+        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+        paddingHorizontal: 28, paddingBottom: 24, paddingTop: 12,
     },
     galleryBtn: {
-        width: 72,
-        height: 72,
-        borderRadius: 16,
-        backgroundColor: 'rgba(255,255,255,0.96)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 1,
-        borderColor: '#e2e8f0',
+        width: 72, height: 72, borderRadius: 16,
+        backgroundColor: 'rgba(255,255,255,0.96)', alignItems: 'center', justifyContent: 'center',
+        borderWidth: 1, borderColor: '#e2e8f0',
     },
-    galleryTxt: {
-        color: '#0f172a',
-        fontSize: 12,
-        fontWeight: '700',
-    },
+    galleryTxt: { color: '#0f172a', fontSize: 12, fontWeight: '700' },
     shutter: {
-        width: 84,
-        height: 84,
-        borderRadius: 42,
-        borderWidth: 4,
-        borderColor: '#ffffff',
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'rgba(255,255,255,0.18)',
+        width: 84, height: 84, borderRadius: 42, borderWidth: 4, borderColor: '#ffffff',
+        alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,255,255,0.18)',
     },
-    shutterBusy: {
-        borderColor: '#22c55e',
-    },
-    shutterInner: {
-        width: 68,
-        height: 68,
-        borderRadius: 34,
-        backgroundColor: '#ffffff',
-    },
-    shutterInnerBusy: {
-        backgroundColor: '#dcfce7',
-    },
+    shutterBusy: { borderColor: '#22c55e' },
+    shutterInner: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#ffffff' },
+    shutterInnerBusy: { backgroundColor: '#dcfce7' },
 });
