@@ -1,16 +1,38 @@
 // src/screens/CameraScreen.jsx
 import React, { useRef, useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Alert, SafeAreaView } from 'react-native';
+import {
+    View, Text, TouchableOpacity, StyleSheet,
+    Alert, SafeAreaView, PermissionsAndroid, Platform,
+} from 'react-native';
 import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 import ImageCropPicker from 'react-native-image-crop-picker';
-import { getDimensions } from '../utils/ImageConverter';
+import { CameraRoll } from '@react-native-camera-roll/camera-roll';
+
+// ✅ Profile image is always 95×110 — no imageType param needed
+const PROFILE_W = 95;
+const PROFILE_H = 110;
+
+// ─── 申请保存到相册的权限 ─────────────────────────────────────────
+async function requestSavePermission() {
+    if (Platform.OS !== 'android') return true;
+
+    if (Platform.Version >= 33) {
+        // Android 13+
+        const result = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+        );
+        return result === PermissionsAndroid.RESULTS.GRANTED;
+    } else {
+        // Android 12 以下
+        const result = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE
+        );
+        return result === PermissionsAndroid.RESULTS.GRANTED;
+    }
+}
 
 export default function CameraScreen({ navigation, route }) {
-    const { device: bleDevice, deviceName, phase, imageType } = route.params;
-    const { w, h } = getDimensions(imageType);
-
-    const GUIDE_W = w * 3;
-    const GUIDE_H = h * 3;
+    const { device: bleDevice, deviceName, phase } = route.params;
 
     const cam = useRef(null);
     const device = useCameraDevice('back');
@@ -21,6 +43,16 @@ export default function CameraScreen({ navigation, route }) {
         if (!hasPermission) requestPermission();
     }, [hasPermission, requestPermission]);
 
+    // After crop, go to GreetingInput (not CropSend directly)
+    const afterCrop = (uri) => {
+        navigation.navigate('GreetingInput', {
+            device: bleDevice,
+            deviceName,
+            phase,
+            imageUri: uri,
+        });
+    };
+
     const shoot = async () => {
         if (!cam.current || busy) return;
         setBusy(true);
@@ -28,21 +60,24 @@ export default function CameraScreen({ navigation, route }) {
             const photo = await cam.current.takePhoto({ flash: 'off' });
             const uri = photo.path.startsWith('/') ? `file://${photo.path}` : photo.path;
 
+            // ✅ 保存到相册
+            const ok = await requestSavePermission();
+            if (ok) {
+                await CameraRoll.save(uri, { type: 'photo', album: 'MeterApp' });
+            }
+
             const cropped = await ImageCropPicker.openCropper({
                 path: uri,
-                width: w, height: h,
-                cropperToolbarTitle: `Crop to ${w}×${h}`,
+                width: PROFILE_W,
+                height: PROFILE_H,
+                cropperToolbarTitle: `Crop to ${PROFILE_W}×${PROFILE_H}`,
                 cropperActiveWidgetColor: '#16a34a',
                 cropperToolbarColor: '#ffffff',
                 cropperStatusBarColor: '#f8fafc',
                 cropperToolbarWidgetColor: '#0f172a',
                 compressImageQuality: 1,
             });
-
-            navigation.navigate('CropSend', {
-                device: bleDevice, deviceName, phase, imageType,
-                imageUri: cropped.path,
-            });
+            afterCrop(cropped.path);
         } catch (e) {
             if (e.code !== 'E_PICKER_CANCELLED') Alert.alert('Error', e.message);
         } finally {
@@ -53,19 +88,17 @@ export default function CameraScreen({ navigation, route }) {
     const gallery = async () => {
         try {
             const img = await ImageCropPicker.openPicker({
-                width: w, height: h,
+                width: PROFILE_W,
+                height: PROFILE_H,
                 cropping: true,
-                cropperToolbarTitle: `Crop to ${w}×${h}`,
+                cropperToolbarTitle: `Crop to ${PROFILE_W}×${PROFILE_H}`,
                 cropperActiveWidgetColor: '#16a34a',
                 cropperToolbarColor: '#ffffff',
                 cropperStatusBarColor: '#f8fafc',
                 cropperToolbarWidgetColor: '#0f172a',
                 compressImageQuality: 1,
             });
-            navigation.navigate('CropSend', {
-                device: bleDevice, deviceName, phase, imageType,
-                imageUri: img.path,
-            });
+            afterCrop(img.path);
         } catch (e) {
             if (e.code !== 'E_PICKER_CANCELLED') Alert.alert('Error', e.message);
         }
@@ -76,9 +109,7 @@ export default function CameraScreen({ navigation, route }) {
             <SafeAreaView style={styles.center}>
                 <View style={styles.centerCard}>
                     <Text style={styles.permTitle}>Camera permission required</Text>
-                    <Text style={styles.permText}>
-                        Allow camera access to capture and crop an image for the meter LCD.
-                    </Text>
+                    <Text style={styles.permText}>Allow camera access to capture the profile picture.</Text>
                     <TouchableOpacity style={styles.permBtn} onPress={requestPermission}>
                         <Text style={styles.permBtnText}>Grant access</Text>
                     </TouchableOpacity>
@@ -102,40 +133,26 @@ export default function CameraScreen({ navigation, route }) {
         <View style={styles.container}>
             <Camera ref={cam} style={StyleSheet.absoluteFill} device={device} isActive photo />
 
+            {/* Top bar */}
             <SafeAreaView style={styles.topBar}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.topBtn}>
                     <Text style={styles.topBtnTxt}>✕</Text>
                 </TouchableOpacity>
                 <View style={styles.topTitlePill}>
-                    <Text style={styles.topTitle}>{w}×{h}</Text>
+                    <Text style={styles.topTitle}>Profile · {PROFILE_W}×{PROFILE_H}</Text>
                 </View>
                 <View style={{ width: 44 }} />
             </SafeAreaView>
 
-            <View style={styles.overlayTop} />
-            <View style={styles.overlayMid}>
-                <View style={styles.overlaySide} />
-                <View style={[styles.guide, { width: GUIDE_W, height: GUIDE_H }]}>
-                    {[
-                        { top: 0, left: 0, borderRightWidth: 0, borderBottomWidth: 0 },
-                        { top: 0, right: 0, borderLeftWidth: 0, borderBottomWidth: 0 },
-                        { bottom: 0, left: 0, borderRightWidth: 0, borderTopWidth: 0 },
-                        { bottom: 0, right: 0, borderLeftWidth: 0, borderTopWidth: 0 },
-                    ].map((cs, i) => (
-                        <View key={i} style={[styles.corner, cs]} />
-                    ))}
-                </View>
-                <View style={styles.overlaySide} />
-            </View>
-            <View style={styles.overlayBottom} />
-
+            {/* Bottom bar */}
             <SafeAreaView style={styles.bottomBar}>
                 <TouchableOpacity style={styles.galleryBtn} onPress={gallery}>
                     <Text style={styles.galleryTxt}>Gallery</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={[styles.shutter, busy && styles.shutterBusy]}
-                    onPress={shoot} disabled={busy}
+                    onPress={shoot}
+                    disabled={busy}
                 >
                     <View style={[styles.shutterInner, busy && styles.shutterInnerBusy]} />
                 </TouchableOpacity>
@@ -146,22 +163,19 @@ export default function CameraScreen({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8fafc' },
-    center: {
-        flex: 1, backgroundColor: '#f8fafc',
-        alignItems: 'center', justifyContent: 'center', padding: 24,
-    },
+    container: { flex: 1, backgroundColor: '#000000' },
+    center: { flex: 1, backgroundColor: '#f8fafc', alignItems: 'center', justifyContent: 'center', padding: 24 },
     centerCard: {
         width: '100%', maxWidth: 420, backgroundColor: '#ffffff',
         borderRadius: 18, padding: 24, borderWidth: 1, borderColor: '#e2e8f0',
-        shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10,
-        shadowOffset: { width: 0, height: 3 }, elevation: 2,
+        shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 2,
     },
     permTitle: { fontSize: 20, fontWeight: '700', color: '#0f172a', marginBottom: 8, textAlign: 'center' },
     permText: { color: '#64748b', fontSize: 14, lineHeight: 21, textAlign: 'center', marginBottom: 18 },
     permBtn: { backgroundColor: '#16a34a', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12, alignSelf: 'center' },
     permBtnText: { color: '#ffffff', fontWeight: '700' },
     topBar: {
+        position: 'absolute', top: 0, left: 0, right: 0,
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
         paddingHorizontal: 20, paddingVertical: 12,
     },
@@ -175,15 +189,10 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.94)', borderWidth: 1, borderColor: '#e2e8f0',
     },
     topTitle: { color: '#0f172a', fontSize: 13, fontWeight: '700' },
-    overlayTop: { flex: 1, backgroundColor: 'rgba(15,23,42,0.34)', width: '100%' },
-    overlayMid: { flexDirection: 'row' },
-    overlaySide: { flex: 1, backgroundColor: 'rgba(15,23,42,0.34)' },
-    guide: { borderWidth: 1, borderColor: 'rgba(255,255,255,0.65)' },
-    corner: { position: 'absolute', width: 22, height: 22, borderColor: '#22c55e', borderWidth: 3 },
-    overlayBottom: { flex: 1, backgroundColor: 'rgba(15,23,42,0.34)', width: '100%' },
     bottomBar: {
+        position: 'absolute', bottom: 0, left: 0, right: 0,
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        paddingHorizontal: 28, paddingBottom: 24, paddingTop: 12,
+        paddingHorizontal: 28, paddingBottom: 36, paddingTop: 12,
     },
     galleryBtn: {
         width: 72, height: 72, borderRadius: 16,

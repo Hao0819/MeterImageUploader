@@ -1,19 +1,19 @@
 // src/utils/ImageConverter.js
 // Ported from meter_lcd_converter.py
-// Mode 1 = Profile picture  (RGB565, 70x118)
+// Mode 1 = Profile picture  (RGB565, 88x128)
 // Mode 2 = Mono 1-bit       (not used in app yet)
 // Mode 3 = Company logo     (RGB565, 35x58)
-// Mode 4 = Greeting screen  (1-bit mono, 128x64)
+// Mode 4 = Greeting screen  (1-bit mono, 128x128)
 
 export const LCD_W = 128;
 export const LCD_H = 128;
 
 // ─── Profile (mode 1) ────────────────────────────────────────────
-export const ASSET_W = 70;
-export const ASSET_H = 118;
-export const LCD_X = Math.floor((LCD_W - ASSET_W) / 2); // 29
-export const LCD_Y = Math.floor((LCD_H - ASSET_H) / 2); // 5
-export const RGB565_BYTES = ASSET_W * ASSET_H * 2;        // 16,520
+export const ASSET_W = 95;
+export const ASSET_H = 110;
+export const LCD_X = Math.floor((LCD_W - ASSET_W) / 2); // 20
+export const LCD_Y = Math.floor((LCD_H - ASSET_H) / 2); // 0
+export const RGB565_BYTES = ASSET_W * ASSET_H * 2;        // 20,900
 
 // ─── Logo (mode 3) ───────────────────────────────────────────────
 export const LOGO_W = 35;
@@ -21,9 +21,9 @@ export const LOGO_H = 58;
 export const LOGO_RGB565_BYTES = LOGO_W * LOGO_H * 2;     // 4,060
 
 // ─── Greeting (mode 4) ───────────────────────────────────────────
-export const GREETING_W = 128;
-export const GREETING_H = 64;
-export const GREETING_BYTES = Math.ceil((GREETING_W * GREETING_H) / 8); // 1,024
+export const GREETING_W = 120;
+export const GREETING_H = 120;
+export const GREETING_BYTES = Math.ceil((GREETING_W * GREETING_H) / 8); // 1,800
 
 // ─── Image type constants ─────────────────────────────────────────
 export const IMAGE_TYPE = {
@@ -64,10 +64,6 @@ export function rgbaToRgb565(rgbaPixels) {
 }
 
 // ─── 1-bit mono helpers ───────────────────────────────────────────
-/**
- * Convert RGBA pixels to 1-bit packed mono (MSB first, row-padded to byte).
- * Threshold: pixel brightness > 127 → 1 (white), else → 0 (black).
- */
 export function rgbaToMono1(rgbaPixels, width, height) {
     const packed = [];
     for (let y = 0; y < height; y++) {
@@ -97,100 +93,34 @@ export function rgbaToMono1(rgbaPixels, width, height) {
 }
 
 // ─── Main converters ──────────────────────────────────────────────
-
-/**
- * Convert JPEG/PNG buffer to RGB565 bytes (Profile or Logo).
- * The image must already be cropped to the correct size.
- */
 export async function convertImageBuffer(fileBuffer, imageType = IMAGE_TYPE.PROFILE) {
     const jpeg = require('jpeg-js');
     const { w, h } = getDimensions(imageType);
-
     const decoded = jpeg.decode(fileBuffer, { useTArray: true, formatAsRGBA: true });
-
     if (decoded.width !== w || decoded.height !== h) {
         throw new Error(
             `Image must be ${w}×${h} after cropping. Got ${decoded.width}×${decoded.height}.`
         );
     }
-
     return rgbaToRgb565(decoded.data);
-}
-
-/**
- * Convert greeting text to 1-bit mono bitmap bytes (128×64).
- * Renders text centred inside the bitmap using a simple pixel font map.
- * Returns Uint8Array of 1,024 bytes.
- *
- * Note: Because React Native JS has no canvas, we use a hand-rolled
- * 5×7 bitmap font for ASCII printable chars (0x20–0x7E).
- */
-export function convertGreetingText(text) {
-    // 5×7 bitmap font (each char = 5 columns, each column = 7-bit mask, MSB = top)
-    const FONT = get5x7Font();
-    const CHAR_W = 5;
-    const CHAR_H = 7;
-    const CHAR_GAP = 1; // 1px horizontal gap between chars
-    const LINE_GAP = 3; // 3px vertical gap between lines
-    const MARGIN = 8; // px margin from edge
-
-    const W = GREETING_W;
-    const H = GREETING_H;
-    const pixels = new Uint8Array(W * H); // 0 = black, 1 = white
-
-    // Word-wrap text to fit within margin
-    const maxLineW = W - MARGIN * 2;
-    const lines = wrapText(text, maxLineW, CHAR_W, CHAR_GAP);
-
-    const lineH = CHAR_H + LINE_GAP;
-    const totalTextH = lines.length * lineH - LINE_GAP;
-    const startY = Math.floor((H - totalTextH) / 2);
-
-    lines.forEach((line, li) => {
-        const linePixelW = line.length * (CHAR_W + CHAR_GAP) - CHAR_GAP;
-        const startX = Math.floor((W - linePixelW) / 2);
-        const y0 = startY + li * lineH;
-
-        [...line].forEach((ch, ci) => {
-            const cols = FONT[ch] || FONT[' '];
-            const x0 = startX + ci * (CHAR_W + CHAR_GAP);
-            cols.forEach((colMask, col) => {
-                for (let row = 0; row < CHAR_H; row++) {
-                    const bit = (colMask >> (CHAR_H - 1 - row)) & 1;
-                    const px = x0 + col;
-                    const py = y0 + row;
-                    if (px >= 0 && px < W && py >= 0 && py < H) {
-                        pixels[py * W + px] = bit;
-                    }
-                }
-            });
-        });
-    });
-
-    // Pack pixels to 1-bit mono
-    const packed = [];
-    for (let y = 0; y < H; y++) {
-        let cur = 0, bits = 0;
-        for (let x = 0; x < W; x++) {
-            cur = (cur << 1) | pixels[y * W + x];
-            bits++;
-            if (bits === 8) { packed.push(cur); cur = 0; bits = 0; }
-        }
-        if (bits > 0) { cur <<= (8 - bits); packed.push(cur); }
-    }
-    return new Uint8Array(packed);
 }
 
 // ─── Text wrap helper ─────────────────────────────────────────────
 function wrapText(text, maxPixelW, charW, gap) {
     const cellW = charW + gap;
+    const maxCharsPerLine = Math.floor((maxPixelW + gap) / cellW);
     const words = text.split(' ');
     const lines = [];
     let current = '';
 
     words.forEach(word => {
+        while (word.length > maxCharsPerLine) {
+            if (current) { lines.push(current); current = ''; }
+            lines.push(word.slice(0, maxCharsPerLine));
+            word = word.slice(maxCharsPerLine);
+        }
         const trial = current ? current + ' ' + word : word;
-        if (trial.length * cellW - gap <= maxPixelW) {
+        if (trial.length <= maxCharsPerLine) {
             current = trial;
         } else {
             if (current) lines.push(current);
@@ -201,15 +131,118 @@ function wrapText(text, maxPixelW, charW, gap) {
     return lines.length ? lines : [''];
 }
 
-/** Hex preview string for first N bytes */
-export function hexPreview(bytes, n = 16) {
-    return Array.from(bytes.slice(0, n))
-        .map(b => '0x' + b.toString(16).padStart(2, '0').toUpperCase())
-        .join(' ');
+// ─── Convert greeting text to 1-bit mono ─────────────────────────
+export function convertGreetingText(text) {
+    const FONT = get5x7Font();
+    const CHAR_W = 5;
+    const CHAR_H = 7;
+    const CHAR_GAP = 2;
+    const LINE_GAP = 6;
+    const MARGIN = 6;
+
+    const W = GREETING_W;
+    const H = GREETING_H;
+    const pixels = new Uint8Array(W * H); // 0=black, 1=white
+
+    const maxLineW = W - MARGIN * 2;
+    const lines = wrapText(text, maxLineW, CHAR_W, CHAR_GAP);
+
+    const lineH = CHAR_H + LINE_GAP;
+    const totalTextH = lines.length * lineH - LINE_GAP;
+    const startY = Math.floor((H - totalTextH) / 2);
+
+    // 1. 正常画字：左到右，上到下
+    lines.forEach((line, li) => {
+        const linePixelW = line.length * (CHAR_W + CHAR_GAP) - CHAR_GAP;
+        const startX = Math.floor((W - linePixelW) / 2);
+        const y0 = startY + li * lineH;
+
+        [...line].forEach((ch, ci) => {
+            const cols = FONT[ch] || FONT[' '];
+            const x0 = startX + ci * (CHAR_W + CHAR_GAP);
+
+            cols.forEach((colMask, col) => {
+                for (let row = 0; row < CHAR_H; row++) {
+                    const bit = (colMask >> row) & 1;
+                    const px = (W - 1) - (x0 + col);  
+                    const py = y0 + row;
+
+                    if (px >= 0 && px < W && py >= 0 && py < H) {
+                        pixels[py * W + px] = bit;
+                    }
+                }
+            });
+        });
+    });
+    const packed = [];
+    for (let y = 0; y < H; y++) {          // ← Y改成正常顺序
+        let cur = 0, bits = 0;
+        for (let x = W - 1; x >= 0; x--) { // ← X反转（不动）
+            cur = (cur << 1) | pixels[y * W + x];
+            bits++;
+            if (bits === 8) { packed.push(cur); cur = 0; bits = 0; }
+        }
+        if (bits > 0) { cur <<= (8 - bits); packed.push(cur); }
+    }
+    return new Uint8Array(packed);
+}
+
+// ─── Hex preview ──────────────────────────────────────────────────
+export function hexPreview(bytes, bytesPerPacket = 240, totalPackets = null) {
+    const packetCount = totalPackets ?? Math.ceil(bytes.length / bytesPerPacket);
+    const lines = [];
+    for (let idx = 0; idx < packetCount; idx++) {
+        const start = idx * bytesPerPacket;
+        const chunk = bytes.slice(start, start + bytesPerPacket);
+        const lo = (idx & 0xff).toString(16).padStart(2, '0').toUpperCase();
+        const hi = ((idx >> 8) & 0xff).toString(16).padStart(2, '0').toUpperCase();
+        const preview = Array.from(chunk.slice(0, 16))
+            .map(b => b.toString(16).padStart(2, '0').toUpperCase())
+            .join(' ');
+        lines.push(`📦 #${String(idx).padStart(3, '0')} [${lo} ${hi}] ${idx + 1}/${packetCount} | ${preview}...`);
+    }
+    return lines.join('\n');
+}
+
+// ─── Alias exports for CropSend.jsx ──────────────────────────────
+export const PROFILE_W = ASSET_W;
+export const PROFILE_H = ASSET_H;
+export const PROFILE_RGB565_BYTES = RGB565_BYTES;
+export const GREETING_MONO_BYTES = GREETING_BYTES;
+
+export async function convertProfileBuffer(fileBuffer) {
+    return convertImageBuffer(fileBuffer, IMAGE_TYPE.PROFILE);
+}
+
+// ─── Checkerboard test pattern ────────────────────────────────────
+export function generateCheckerboardGreeting(cellSize = 8) {
+    const W = GREETING_W;
+    const H = GREETING_H;
+    const pixels = new Uint8Array(W * H);
+
+    for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+            const col = Math.floor(x / cellSize);
+            const row = Math.floor(y / cellSize);
+            pixels[y * W + x] = (col + row) % 2 === 0 ? 1 : 0;
+        }
+    }
+
+    // Pack pixels to 1-bit mono (flip vertically + horizontally for device)
+    const packed = [];
+    for (let y = H - 1; y >= 0; y--) {
+        let cur = 0, bits = 0;
+        for (let x = W - 1; x >= 0; x--) {   // ← x 也反向
+            cur = (cur << 1) | pixels[y * W + x];
+            bits++;
+            if (bits === 8) { packed.push(cur); cur = 0; bits = 0; }
+        }
+        if (bits > 0) { cur <<= (8 - bits); packed.push(cur); }
+    }
+    return new Uint8Array(packed);
 }
 
 // ─── 5×7 Pixel font (ASCII 0x20–0x7E) ────────────────────────────
-// Each entry: 5 column masks, 7 bits each (MSB = topmost pixel row).
 function get5x7Font() {
     return {
         ' ': [0x00, 0x00, 0x00, 0x00, 0x00],
