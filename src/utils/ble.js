@@ -154,7 +154,7 @@ function buildPacket(packetIndex, chunk) {
 export async function sendCombined(device, profileBytes, greetingBytes, onProgress) {
 
     // 建立 24,576 字节的合并缓冲区（全部初始化为 0）
-    const combined = new Uint8Array(TOTAL_TRANSFER_BYTES);
+    const combined = new Uint8Array(TOTAL_TRANSFER_BYTES).fill(0xFF);
 
     // 前段：Profile 放到位置 0 开始（最多放 22,320 字节）
     combined.set(
@@ -183,7 +183,7 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
         const packet = buildPacket(i, chunk);
 
         const isLast = i === TOTAL_PACKETS - 1;
-        await writeBytes(device, dataServiceUuid, CHAR_UUID_DATA, packet, isLast);
+        await writeBytes(device, dataServiceUuid, CHAR_UUID_DATA, packet, false);
 
         onProgress?.(i + 1, TOTAL_PACKETS, i);
         await sleep(isLast ? 100 : 15);
