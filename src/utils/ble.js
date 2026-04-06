@@ -10,18 +10,13 @@ export const CHAR_UUID = CHAR_UUID_CTRL;
 // ─── Start / Stop commands ────────────────────────────────────────────────────
 export const CMD_START = new Uint8Array([0xa7, 0x3c, 0xd1, 0x5e]);
 export const CMD_STOP = new Uint8Array([0x9b, 0x42]);
-
-// ─── Protocol constants ───────────────────────────────────────────────────────
-// 合并传输布局：
-//   包 000–092 → Profile  (RGB565,  93×240 = 22,320 字节区段)
-//   包 093–102 → Greeting (mono1,   10×240 =  2,256 字节区段)
-//   合计 = 24,576 字节 = 24 KB
 export const COUNTER_BYTES = 2;
-export const DATA_BYTES_PER_PACKET = 240;
-export const TOTAL_TRANSFER_BYTES = 24 * 1024;                                        // 24,576
-export const TOTAL_PACKETS = Math.ceil(TOTAL_TRANSFER_BYTES / DATA_BYTES_PER_PACKET); // 103
-export const GREETING_START_PACKET = 93; // Greeting从第93包开始
-
+export const CHUNK_SIZE = 128;
+export const PROFILE_PACKETS = 256;              // counter 0–255
+export const GREETING_START_COUNTER = 896;       // counter 896–911
+export const GREETING_PACKETS = 16;
+export const PROFILE_BYTES_TOTAL = PROFILE_PACKETS * CHUNK_SIZE;    // 32KB
+export const GREETING_BYTES_TOTAL = GREETING_PACKETS * CHUNK_SIZE;  // 2KB
 // ─── Manager singleton ────────────────────────────────────────────────────────
 let _manager = null;
 export const getManager = () => {
@@ -120,27 +115,36 @@ async function writeBytes(device, serviceUuid, charUuid, bytes, withResponse = f
     return device.writeCharacteristicWithoutResponseForService(serviceUuid, charUuid, value);
 }
 
-// ─── Build packet: 2-byte little-endian counter + 240 bytes payload ──────────
-function buildPacket(packetIndex, chunk) {
-    const packet = new Uint8Array(COUNTER_BYTES + DATA_BYTES_PER_PACKET);
-    packet[0] = packetIndex & 0xff;         // low byte first
-    packet[1] = (packetIndex >> 8) & 0xff;  // high byte second
-    packet.set(chunk, 2);
-    return packet;
+// ─── Retry helper ─────────────────────────────────────────────────────────────
+async function writeWithRetry(device, serviceUuid, charUuid, packet, maxRetries = 20) {
+    let lastErr;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            await writeBytes(device, serviceUuid, charUuid, packet, false);
+            return { success: true, attempts: attempt + 1 };
+        } catch (err) {
+            lastErr = err;
+            if (attempt < maxRetries) await sleep(1);
+        }
+    }
+    return { success: false, attempts: maxRetries + 1, error: lastErr };
 }
 
 // ─── Main send function ───────────────────────────────────────────────────────
 /**
- * 合并发送 Profile + Greeting，共103包一次传输完成
+ * 合并发送 Profile + Greeting
+ *
+ * 每包 256 字节，拆成两次 BLE 写入发送：
+ *   第一次：2字节counter + 前字节数据  = 130 字节
+ *   第二次：             后128字节数据  = 128 字节
  *
  * 布局：
- *   包 000–092 → profileBytes  (RGB565, 93×240 = 22,320 字节区段)
- *   包 093–102 → greetingBytes (mono1,  10×240 =  2,256 字节区段)
- *   合计 = 24,576 字节 = 24 KB ✅
+ *   包 000–175 → profileBytes  (RGB565)
+ *   包 176–???  → greetingBytes (mono1)
  *
  * Protocol:
  *   1) Write CMD_START  → CHAR_UUID_CTRL  (519ebbd3-...)
- *   2) Write data pkts  → CHAR_UUID_DATA  (8f3c2a71-...)
+ *   2) Write data pkts  → CHAR_UUID_DATA  (8f3c2a71-...)  ← 每包写两次
  *   3) Write CMD_STOP   → CHAR_UUID_CTRL  (519ebbd3-...)
  *
  * @param {object}     device        BLE设备对象
@@ -148,49 +152,74 @@ function buildPacket(packetIndex, chunk) {
  * @param {Uint8Array} greetingBytes Greeting字节 (1-bit mono格式)
  * @param {function}   onProgress    (sent, total, idx) 回调
  *                                     sent  = 已发送包数 (从1开始)
- *                                     total = TOTAL_PACKETS (103)
+ *                                     total = TOTAL_PACKETS
  *                                     idx   = 当前包序号 (从0开始)
  */
 export async function sendCombined(device, profileBytes, greetingBytes, onProgress) {
 
-    // 建立 24,576 字节的合并缓冲区（全部初始化为 0）
-    const combined = new Uint8Array(TOTAL_TRANSFER_BYTES).fill(0xFF);
-
-    // 前段：Profile 放到位置 0 开始（最多放 22,320 字节）
-    combined.set(
-        profileBytes.slice(0, GREETING_START_PACKET * DATA_BYTES_PER_PACKET),
-        0
-    );
-
-    // 后段：Greeting 放到位置 22,320 开始（最多放 2,256 字节）
-    combined.set(
-        greetingBytes.slice(0, (TOTAL_PACKETS - GREETING_START_PACKET) * DATA_BYTES_PER_PACKET),
-        GREETING_START_PACKET * DATA_BYTES_PER_PACKET
-    );
-
-    // 找到 BLE 服务 UUID
     const ctrlServiceUuid = await findServiceUuidByCharacteristic(device, CHAR_UUID_CTRL);
     const dataServiceUuid = await findServiceUuidByCharacteristic(device, CHAR_UUID_DATA);
 
-    // 1) 发送 START 命令
+    // 1) START
     await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_START, false);
-    await sleep(150);
+    await sleep(10);
 
-    // 2) 发送 103 个数据包
-    for (let i = 0; i < TOTAL_PACKETS; i++) {
-        const offset = i * DATA_BYTES_PER_PACKET;
-        const chunk = combined.slice(offset, offset + DATA_BYTES_PER_PACKET);
-        const packet = buildPacket(i, chunk);
+    const totalWrites = PROFILE_PACKETS + GREETING_PACKETS;
+    let sent = 0;
+    const MAX_RETRIES = 20;
 
-        const isLast = i === TOTAL_PACKETS - 1;
-        await writeBytes(device, dataServiceUuid, CHAR_UUID_DATA, packet, false);
+    const sendPacket = async (counter, dataSlice) => {
+        const packet = new Uint8Array(COUNTER_BYTES + CHUNK_SIZE);
+        packet[0] = counter & 0xff;
+        packet[1] = (counter >> 8) & 0xff;
+        packet.set(dataSlice, COUNTER_BYTES);
 
-        onProgress?.(i + 1, TOTAL_PACKETS, i);
-        await sleep(isLast ? 100 : 15);
-    }
+        const result = await writeWithRetry(device, dataServiceUuid, CHAR_UUID_DATA, packet, MAX_RETRIES);
+        sent++;
 
-    await sleep(150);
+        if (result.success) {
+            if (result.attempts > 1) {
+                onProgress?.(sent, totalWrites, counter, packet,
+                    `⚠️ CTR:${counter.toString(16).toUpperCase().padStart(4, '0')} recovered after ${result.attempts} attempts`
+                );
+            } else {
+                onProgress?.(sent, totalWrites, counter, packet);
+            }
+        } else {
+            onProgress?.(sent, totalWrites, counter, packet,
+                `❌ LOST CTR:${counter.toString(16).toUpperCase().padStart(4, '0')} after ${MAX_RETRIES} retries - ${result.error?.message}`
+            );
+        }
+    };
 
-    // 3) 发送 STOP 命令
+    // ✅ 控制并发数量的函数
+    const sendWithConcurrency = async (packets) => {
+        const CONCURRENCY = 3; // 每次最多 3 包并发
+        for (let i = 0; i < packets.length; i += CONCURRENCY) {
+            const chunk = packets.slice(i, i + CONCURRENCY);
+            await Promise.all(chunk.map(({ counter, data }) => sendPacket(counter, data)));
+            await sleep(2); // 每批之间只等 2ms
+        }
+    };
+
+    // 2) Profile: counter 0–255
+    const profilePackets = Array.from({ length: PROFILE_PACKETS }, (_, j) => ({
+        counter: j,
+        data: profileBytes.slice(j * CHUNK_SIZE, (j + 1) * CHUNK_SIZE),
+    }));
+    await sendWithConcurrency(profilePackets);
+
+    await sleep(10);
+
+    // 3) Greeting: counter 896–911
+    const greetingPackets = Array.from({ length: GREETING_PACKETS }, (_, j) => ({
+        counter: GREETING_START_COUNTER + j,
+        data: greetingBytes.slice(j * CHUNK_SIZE, (j + 1) * CHUNK_SIZE),
+    }));
+    await sendWithConcurrency(greetingPackets);
+
+    await sleep(10);
+
+    // 4) STOP
     await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_STOP, false);
 }

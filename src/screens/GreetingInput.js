@@ -9,7 +9,7 @@ import { captureRef } from 'react-native-view-shot';
 import { GREETING_W, GREETING_H, GREETING_MONO_BYTES } from '../utils/ImageConverter';
 import GreetingRenderer from '../utils/GreetingRenderer';
 
-const MAX_CHARS = 120;
+const MAX_CHARS = 60;
 
 export default function GreetingInput({ navigation, route }) {
     const { device, deviceName, phase, imageUri } = route.params;
@@ -23,53 +23,57 @@ export default function GreetingInput({ navigation, route }) {
     const handleContinue = async () => {
         const trimmed = text.trim();
         if (!trimmed) { setError('Please enter some greeting text.'); return; }
+
+        if (trimmed.length > effectiveMax) {
+            setError(`Too long. Max ${effectiveMax} characters for this language.`);
+            return;
+        }
         setError('');
         setIsProcessing(true);
 
         try {
-            // 1. 截图 → 临时文件 (JPEG)
             const uri = await captureRef(canvasRef, {
                 format: 'jpg',
-                quality: 1,
+                quality: 1.0,
                 width: GREETING_W,
                 height: GREETING_H,
                 result: 'tmpfile',
             });
 
-            // 2. 读取文件 → base64
             const RNFS = require('react-native-fs');
             const base64 = await RNFS.readFile(uri, 'base64');
-
-            // 3. base64 → Uint8Array buffer
             const binary = atob(base64);
             const buffer = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) {
                 buffer[i] = binary.charCodeAt(i);
             }
 
-            // 4. JPEG → RGBA
             const jpeg = require('jpeg-js');
             const decoded = jpeg.decode(buffer.buffer, { useTArray: true, formatAsRGBA: true });
             const rgba = decoded.data;
+            const W = decoded.width;
+            const H = decoded.height;
 
-            const W = GREETING_W;
-            const H = GREETING_H;
+            console.log('rgba length:', rgba.length, 'expected:', GREETING_W * GREETING_H * 4);
+            console.log('nonZero bytes:', Array.from(rgba).filter(b => b !== 0).length);
+            console.log('first 16 bytes:', Array.from(rgba.slice(0, 16)).join(','));
 
-            // 5. RGBA → 1-bit mono（颜色反转：白底黑字）
-            const monoPixels = new Uint8Array(W * H);   // ← 改名避免冲突
+            // 5. RGBA → 1-bit mono
+            // ✅ 用更严格的阈值，避免 JPEG 压缩灰边影响
+            const monoPixels = new Uint8Array(W * H);
             for (let i = 0; i < W * H; i++) {
                 const r = rgba[i * 4];
                 const g = rgba[i * 4 + 1];
                 const b = rgba[i * 4 + 2];
                 const brightness = 0.299 * r + 0.587 * g + 0.114 * b;
-                monoPixels[i] = brightness > 127 ? 0 : 1;  // 反转颜色
+                monoPixels[i] = brightness < 127 ? 1 : 0; 
             }
 
-            // 6. 打包（修复镜像：从左到右正序）
+            // 6. 打包倒序
             const packed = [];
             for (let y = 0; y < H; y++) {
                 let cur = 0, bits = 0;
-                for (let x = 0; x < W; x++) {   // ← 正序，修复镜像
+                for (let x = 0; x < W; x++) {
                     cur = (cur << 1) | monoPixels[y * W + x];
                     bits++;
                     if (bits === 8) { packed.push(cur); cur = 0; bits = 0; }
@@ -95,8 +99,9 @@ export default function GreetingInput({ navigation, route }) {
         }
     };
 
-    const remaining = MAX_CHARS - text.length;
-
+    const isEnglishOnly = /^[a-zA-Z0-9\s\p{P}\p{S}]*$/u.test(text);
+    const effectiveMax = isEnglishOnly ? 60 : 30;
+    const remaining = effectiveMax - text.length;
     return (
         <SafeAreaView style={s.container}>
             <KeyboardAvoidingView
@@ -138,7 +143,7 @@ export default function GreetingInput({ navigation, route }) {
                                 placeholder="e.g. Welcome! 欢迎 مرحبا"
                                 placeholderTextColor="#94a3b8"
                                 multiline
-                                maxLength={MAX_CHARS}
+                                maxLength={effectiveMax}
                                 autoFocus
                                 returnKeyType="default"
                             />
@@ -146,18 +151,14 @@ export default function GreetingInput({ navigation, route }) {
                         <View style={s.inputMeta}>
                             {error
                                 ? <Text style={s.errorText}>{error}</Text>
-                                : <Text style={s.hintText}>✓ Supports English · 中文 · العربية</Text>
+                                : <Text style={s.hintText}>
+                                    {isEnglishOnly
+                                        ? '✓ English · max 60 chars'
+                                        : '⚠️ Non-English · max 30 chars'}
+                                </Text>
                             }
-                            <Text style={[s.counter, remaining < 20 && s.counterWarn]}>{remaining}</Text>
+                            <Text style={[s.counter, remaining < 5 && s.counterWarn]}>{remaining}</Text>
                         </View>
-                    </View>
-
-                    {/* Info card */}
-                    <View style={s.infoCard}>
-                        <InfoRow label="Output format" value="1-bit monochrome" />
-                        <InfoRow label="Resolution" value={`${GREETING_W}×${GREETING_H} px`} />
-                        <InfoRow label="Data size" value={`${GREETING_MONO_BYTES} bytes`} />
-                        <InfoRow label="Font" value="System font (Unicode)" />
                     </View>
 
                     {/* LCD preview */}
@@ -273,11 +274,17 @@ const s = StyleSheet.create({
         fontSize: 10, color: '#64748b', fontWeight: '700',
         textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10,
     },
-    lcdScreen: {
-        backgroundColor: '#ffffff', borderWidth: 1.5, borderColor: '#cbd5e1',
-        borderRadius: 8, paddingHorizontal: 14, paddingVertical: 16,
-        alignItems: 'center', justifyContent: 'center', minHeight: 80,
-    },
+lcdScreen: {
+    backgroundColor: '#ffffff', 
+    borderWidth: 1.5, 
+    borderColor: '#cbd5e1',
+    borderRadius: 8, 
+    width: 128,        // ✅ 固定宽度
+    height: 128,       // ✅ 固定高度
+    alignItems: 'center', 
+    justifyContent: 'center',
+    overflow: 'hidden', // ✅ 防止文字溢出
+},
     lcdText: {
         color: '#000000', fontSize: 13, textAlign: 'center',
         lineHeight: 20, fontFamily: 'monospace', letterSpacing: 0.3,

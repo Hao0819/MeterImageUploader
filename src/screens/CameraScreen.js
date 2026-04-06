@@ -3,16 +3,17 @@ import React, { useRef, useState, useEffect } from 'react';
 import {
     View, Text, TouchableOpacity, StyleSheet,
     Alert, SafeAreaView, PermissionsAndroid, Platform,
+    TouchableWithoutFeedback,  // ← 加这个
 } from 'react-native';
 import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 import ImageCropPicker from 'react-native-image-crop-picker';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 
-// ✅ Profile image is always 95×110 — no imageType param needed
-const PROFILE_W = 95;
-const PROFILE_H = 110;
+// Profile image is always 128×128 — no imageType param needed
+const PROFILE_W = 128;
+const PROFILE_H = 128;
 
-// ─── 申请保存到相册的权限 ─────────────────────────────────────────
+// ─── Request permission to save to album ───────────────────
 async function requestSavePermission() {
     if (Platform.OS !== 'android') return true;
 
@@ -35,10 +36,11 @@ export default function CameraScreen({ navigation, route }) {
     const { device: bleDevice, deviceName, phase } = route.params;
 
     const cam = useRef(null);
-    const device = useCameraDevice('back');
+    const [cameraPosition, setCameraPosition] = useState('back');
+    const device = useCameraDevice(cameraPosition);
     const { hasPermission, requestPermission } = useCameraPermission();
     const [busy, setBusy] = useState(false);
-
+    const [focusPoint, setFocusPoint] = useState(null);  // ← 加这行
     useEffect(() => {
         if (!hasPermission) requestPermission();
     }, [hasPermission, requestPermission]);
@@ -53,6 +55,19 @@ export default function CameraScreen({ navigation, route }) {
         });
     };
 
+    const onTapFocus = async (e) => {
+        const { locationX, locationY } = e.nativeEvent;
+        setFocusPoint({ x: locationX, y: locationY });
+        try {
+            await cam.current.focus({ x: locationX, y: locationY });
+        } catch (_) { }
+        setTimeout(() => setFocusPoint(null), 1000);
+    };
+
+    const flipCamera = () => {
+        setCameraPosition(p => p === 'back' ? 'front' : 'back');
+    };
+    
     const shoot = async () => {
         if (!cam.current || busy) return;
         setBusy(true);
@@ -60,7 +75,7 @@ export default function CameraScreen({ navigation, route }) {
             const photo = await cam.current.takePhoto({ flash: 'off' });
             const uri = photo.path.startsWith('/') ? `file://${photo.path}` : photo.path;
 
-            // ✅ 保存到相册
+            // #1 — Save to album
             const ok = await requestSavePermission();
             if (ok) {
                 await CameraRoll.save(uri, { type: 'photo', album: 'MeterApp' });
@@ -131,8 +146,14 @@ export default function CameraScreen({ navigation, route }) {
 
     return (
         <View style={styles.container}>
-            <Camera ref={cam} style={StyleSheet.absoluteFill} device={device} isActive photo />
-
+            <TouchableWithoutFeedback onPress={onTapFocus}>
+                <View style={StyleSheet.absoluteFill}>
+                    <Camera ref={cam} style={StyleSheet.absoluteFill} device={device} isActive photo />
+                    {focusPoint && (
+                        <View style={[styles.focusBox, { left: focusPoint.x - 30, top: focusPoint.y - 30 }]} />
+                    )}
+                </View>
+            </TouchableWithoutFeedback>
             {/* Top bar */}
             <SafeAreaView style={styles.topBar}>
                 <TouchableOpacity onPress={() => navigation.goBack()} style={styles.topBtn}>
@@ -156,7 +177,9 @@ export default function CameraScreen({ navigation, route }) {
                 >
                     <View style={[styles.shutterInner, busy && styles.shutterInnerBusy]} />
                 </TouchableOpacity>
-                <View style={{ width: 72 }} />
+                <TouchableOpacity style={styles.flipBtn} onPress={flipCamera}>
+                    <Text style={styles.flipTxt}>⟳</Text>
+                </TouchableOpacity>
             </SafeAreaView>
         </View>
     );
@@ -207,4 +230,16 @@ const styles = StyleSheet.create({
     shutterBusy: { borderColor: '#22c55e' },
     shutterInner: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#ffffff' },
     shutterInnerBusy: { backgroundColor: '#dcfce7' },
+    focusBox: {
+        position: 'absolute',
+        width: 60, height: 60,
+        borderWidth: 2, borderColor: '#22c55e',
+        borderRadius: 4,
+    },
+    flipBtn: {
+        width: 72, height: 72, borderRadius: 36,
+        backgroundColor: 'rgba(255,255,255,0.96)', alignItems: 'center', justifyContent: 'center',
+        borderWidth: 1, borderColor: '#e2e8f0',
+    },
+    flipTxt: { color: '#0f172a', fontSize: 28, fontWeight: '600' },
 });

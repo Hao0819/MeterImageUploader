@@ -10,9 +10,9 @@ import { Buffer } from 'buffer';
 import {
     sendCombined,
     disconnectDevice,
-    DATA_BYTES_PER_PACKET,
-    TOTAL_PACKETS,
-    GREETING_START_PACKET,
+    PROFILE_PACKETS,
+    GREETING_PACKETS,
+    GREETING_START_COUNTER,
 } from '../utils/ble';
 
 import {
@@ -46,10 +46,10 @@ export default function CropSend({ navigation, route }) {
     const [progress, setProgress] = useState({ sent: 0, total: 0 });
     const [log, setLog] = useState([]);
     const [hexText, setHexText] = useState('');
-
+    const packetLogsRef = useRef([]);
     const logBufferRef = useRef([]);
     const logScrollRef = useRef(null);
-
+    const [hasLogs, setHasLogs] = useState(false);
     const addLog = useCallback((msg) => {
         logBufferRef.current.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
     }, []);
@@ -79,9 +79,12 @@ export default function CropSend({ navigation, route }) {
             addLog(`greetingBytesArray type: ${typeof greetingBytesArray}, length: ${greetingBytesArray?.length}`);
             addLog(`gBytes first 4: ${gBytes[0]} ${gBytes[1]} ${gBytes[2]} ${gBytes[3]}`);
             addLog(`✅ Greeting ready: ${gBytes.length} bytes (${GREETING_W}×${GREETING_H} mono1)`);
+            addLog(`gBytes first 8: ${Array.from(gBytes.slice(0, 8)).join(',')}`);
+            addLog(`gBytes last 8: ${Array.from(gBytes.slice(-8)).join(',')}`);
+            const nonZero = gBytes.filter(b => b !== 0).length;
+            addLog(`Non-zero bytes: ${nonZero} / ${gBytes.length}`);
             // 3) Hex preview of the combined 24KB buffer layout
-            addLog(`📐 Layout: Profile pkt 000–${String(GREETING_START_PACKET - 1).padStart(3, '0')} | Greeting pkt ${String(GREETING_START_PACKET).padStart(3, '0')}–102`);
-            setHexText(hexPreview(pBytes, DATA_BYTES_PER_PACKET));
+            addLog(`📐 Layout: Profile counter 000–255 | Greeting counter 896–911`);
 
             setStatus(STATUS.IDLE);
         } catch (err) {
@@ -94,7 +97,6 @@ export default function CropSend({ navigation, route }) {
 
     useEffect(() => { convert(); }, [convert]);
 
-    // ── Send ──────────────────────────────────────────────────────
     const send = useCallback(async () => {
         if (!profileBytes || !greetingBytes) return;
 
@@ -106,35 +108,39 @@ export default function CropSend({ navigation, route }) {
         flushLog();
 
         try {
-            await sendCombined(device, profileBytes, greetingBytes, (sent, total, idx) => {
+            const packetLogs = [];
+         flushLog();
+            await sendCombined(device, profileBytes, greetingBytes, (sent, total, counter, packet, errorMsg) => {
+            // const testBytes = new Uint8Array(2048).map((_, i) => i % 2 === 0 ? 0xFF : 0x00);
+            // await sendCombined(device, profileBytes, testBytes, (sent, total, counter, packet, errorMsg) => {
                 setProgress({ sent, total });
 
-                const lo = (idx & 0xff).toString(16).padStart(2, '0').toUpperCase();
-                const hi = ((idx >> 8) & 0xff).toString(16).padStart(2, '0').toUpperCase();
-                const section = idx < GREETING_START_PACKET ? '🖼️ ' : '👋';
+                const section = counter >= GREETING_START_COUNTER ? '👋' : '🖼️ ';
 
-                // Source bytes for preview: profile or greeting section of combined buffer
-                let chunkPreview = '';
-                if (idx < GREETING_START_PACKET) {
-                    const start = idx * DATA_BYTES_PER_PACKET;
-                    const chunk = profileBytes.slice(start, start + DATA_BYTES_PER_PACKET);
-                    chunkPreview = Array.from(chunk.slice(0, 16))
-                        .map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
-                } else {
-                    // ← 加上这段！
-                    const greetingOffset = (idx - GREETING_START_PACKET) * DATA_BYTES_PER_PACKET;
-                    const chunk = greetingBytes.slice(greetingOffset, greetingOffset + DATA_BYTES_PER_PACKET);
-                    chunkPreview = Array.from(chunk.slice(0, 16))
-                        .map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+                // Errors are displayed directly in the CropSend log.
+                if (errorMsg) {
+                    addLog(errorMsg);
+                    flushLog();
                 }
 
-                addLog(`${section} #${String(idx).padStart(3, '0')} [${lo} ${hi}] ${sent}/${total} | ${chunkPreview}...`);
-                if (sent % 10 === 0 || sent === total) flushLog();
+                const hex = Array.from(packet.slice(0, 16))
+                    .map(b => b.toString(16).padStart(2, '0').toUpperCase())
+                    .join(' ');
+                packetLogs.push(`${section} CTR:${counter.toString(16).toUpperCase().padStart(4, '0')} | ${hex}`);
+                 packetLogsRef.current = packetLogs;  // ← 加这行
+                 if (sent === 1) setHasLogs(true);    // ← 加这行
+                if (sent % 20 === 0 || sent === total) {
+                    addLog(`${section} ${sent}/${total} packets sent...`);
+                    flushLog();
+                }
             });
 
-            addLog('Sending STOP command…');
+            // packetLogs are sent to LogViewer, but not added to the CropSend log.
             addLog('✅ Transfer complete!');
             setStatus(STATUS.DONE);
+            // Store it in ref for LogViewer to use.
+            packetLogsRef.current = packetLogs;
+
         } catch (err) {
             addLog('Send error: ' + err.message);
             setStatus(STATUS.ERROR);
@@ -142,7 +148,7 @@ export default function CropSend({ navigation, route }) {
             flushLog();
         }
     }, [device, profileBytes, greetingBytes, addLog, flushLog]);
-
+    
     const disconnect = async () => {
         await disconnectDevice(device);
         navigation.popToTop();
@@ -153,10 +159,10 @@ export default function CropSend({ navigation, route }) {
     const ready = profileBytes && greetingBytes;
 
     // Progress: blue = profile packets, orange = greeting packets
-    const profilePct = Math.min(progress.sent, GREETING_START_PACKET) / TOTAL_PACKETS * 100;
-    const greetingPct = Math.max(0, progress.sent - GREETING_START_PACKET) / TOTAL_PACKETS * 100;
-    const greetingLeft = GREETING_START_PACKET / TOTAL_PACKETS * 100;
-
+    const totalWrites = PROFILE_PACKETS + GREETING_PACKETS;
+    const profilePct = Math.min(progress.sent, PROFILE_PACKETS) / totalWrites * 100;
+    const greetingPct = Math.max(0, progress.sent - PROFILE_PACKETS) / totalWrites * 100;
+    const greetingLeft = PROFILE_PACKETS / totalWrites * 100;
     return (
         <SafeAreaView style={s.container}>
             <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
@@ -195,7 +201,13 @@ export default function CropSend({ navigation, route }) {
                     <View style={s.previewSection}>
                         <Text style={s.previewSectionLabel}>👋 Greeting · {GREETING_W}×{GREETING_H} mono1</Text>
                         <View style={s.lcdPreview}>
-                            <Text style={s.lcdText} numberOfLines={5}>{greetingText}</Text>
+                            <Text style={[
+                                s.lcdText,
+                                /[\u0600-\u06FF]/.test(greetingText) && {
+                                    textAlign: 'right',
+                                    writingDirection: 'rtl',
+                                }
+                            ]}>{greetingText}</Text>
                         </View>
                     </View>
 
@@ -203,7 +215,7 @@ export default function CropSend({ navigation, route }) {
                     <View style={s.infoGrid}>
                         <InfoRow k="Profile bytes" v={profileBytes ? profileBytes.length.toLocaleString() : '—'} />
                         <InfoRow k="Greeting bytes" v={greetingBytes ? greetingBytes.length.toLocaleString() : '—'} />
-                        <InfoRow k="Total packets" v={String(TOTAL_PACKETS)} />
+                        <InfoRow k="Total packets" v={String(PROFILE_PACKETS + GREETING_PACKETS)} />
                         <InfoRow k="Phase" v={phase === 'single' ? 'Single' : '3-Phase'} />
                     </View>
 
@@ -218,16 +230,6 @@ export default function CropSend({ navigation, route }) {
                         <Text style={s.statusText}>{status.toUpperCase()}</Text>
                     </View>
                 </View>
-
-                {/* Hex preview */}
-                {hexText ? (
-                    <View style={s.hexBox}>
-                        <Text style={s.hexLabel}>Profile hex preview (pkt 000–{String(GREETING_START_PACKET - 1).padStart(3, '0')})</Text>
-                        <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
-                            <Text style={s.hexVal}>{hexText}</Text>
-                        </ScrollView>
-                    </View>
-                ) : null}
 
                 {/* Send button */}
                 {status !== STATUS.DONE && (
@@ -253,7 +255,7 @@ export default function CropSend({ navigation, route }) {
                         </View>
                         <Text style={s.progTxt}>
                             {progress.sent} / {progress.total} packets ({pct}%)
-                            {progress.sent >= GREETING_START_PACKET ? '  👋 Greeting' : '  🖼️ Profile'}
+                            {progress.sent >= PROFILE_PACKETS ? '  👋 Greeting' : '  🖼️ Profile'}
                         </Text>
                     </View>
                 )}
@@ -262,13 +264,25 @@ export default function CropSend({ navigation, route }) {
                 {status === STATUS.DONE && (
                     <View style={s.doneCard}>
                         <Text style={s.doneTxt}>✅ Transfer complete!</Text>
-                        <TouchableOpacity
-                            onPress={() => navigation.popToTop()}
-                            style={s.doneBtn}
-                        >
-                            <Text style={s.doneBtnTxt}>Start over</Text>
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', gap: 10 }}>
+                            <TouchableOpacity
+                                onPress={() => navigation.popToTop()}
+                                style={s.doneBtn}
+                            >
+                                <Text style={s.doneBtnTxt}>Start over</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
+                )}
+
+                {/* View Log — always visible once packets are sent */}
+                {hasLogs && (
+                    <TouchableOpacity
+                        onPress={() => navigation.navigate('LogViewer', { logs: packetLogsRef.current })}
+                        style={[s.doneBtn, { backgroundColor: '#2196F3', marginBottom: 16, alignItems: 'center' }]}
+                    >
+                        <Text style={s.doneBtnTxt}>View Log ({packetLogsRef.current.length} packets)</Text>
+                    </TouchableOpacity>
                 )}
 
                 {/* Log */}
@@ -326,15 +340,13 @@ const s = StyleSheet.create({
     cardTitle: { fontSize: 18, fontWeight: '700', color: '#0f172a', marginBottom: 14 },
     previewSection: { marginBottom: 14 },
     previewSectionLabel: { fontSize: 12, color: '#64748b', fontWeight: '600', marginBottom: 8 },
-    profileImg: { width: 95 * 2, height: 110 * 2, borderRadius: 10, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#dbe3ee' },
+    profileImg: { width: 128 * 2, height: 128 * 2, borderRadius: 10, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#dbe3ee' },
     lcdPreview: {
         backgroundColor: '#ffffff', borderWidth: 1.5, borderColor: '#cbd5e1',
-        borderRadius: 8, paddingHorizontal: 14, paddingVertical: 12,
-        alignItems: 'center', justifyContent: 'center', minHeight: 70,
-        width: 120 * 2,
+        borderRadius: 8, width: 128, height: 128,
+        alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
     },
-    lcdText: { color: '#000000', fontSize: 12, textAlign: 'center', lineHeight: 18, fontFamily: 'monospace' },
-
+    lcdText: { color: '#000000', fontSize: 13, textAlign: 'center', lineHeight: 20, fontFamily: 'monospace', letterSpacing: 0.3 },
     infoGrid: { gap: 4, marginTop: 8 },
     infoRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3 },
     infoKey: { fontSize: 12, color: '#64748b' },
