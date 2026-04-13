@@ -12,7 +12,7 @@ import GreetingRenderer from '../utils/GreetingRenderer';
 const MAX_CHARS = 60;
 
 export default function GreetingInput({ navigation, route }) {
-    const { device, deviceName, phase, imageUri } = route.params;
+    const { device, deviceName, phase, imageUri, updateType } = route.params;
 
     const [text, setText] = useState('');
     const [error, setError] = useState('');
@@ -88,6 +88,7 @@ export default function GreetingInput({ navigation, route }) {
                 deviceName,
                 phase,
                 imageUri,
+                updateType,
                 greetingText: trimmed,
                 greetingBytes: Array.from(greetingBytes),
             });
@@ -100,7 +101,7 @@ export default function GreetingInput({ navigation, route }) {
     };
 
     const isEnglishOnly = /^[a-zA-Z0-9\s\p{P}\p{S}]*$/u.test(text);
-    const effectiveMax = isEnglishOnly ? 60 : 30;
+    const effectiveMax = isEnglishOnly ? 80 : 40;
     const remaining = effectiveMax - text.length;
     return (
         <SafeAreaView style={s.container}>
@@ -112,9 +113,14 @@ export default function GreetingInput({ navigation, route }) {
 
                     {/* Header */}
                     <View style={s.header}>
-                        <TouchableOpacity onPress={() => navigation.goBack()} style={s.back}>
-                            <Text style={s.backText}>‹ Back</Text>
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                            <TouchableOpacity onPress={() => navigation.goBack()} style={s.back}>
+                                <Text style={s.backText}>‹ Back</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => navigation.navigate('PhaseSelect', { device, deviceName })}>
+                                <Text style={{ fontSize: 22 }}>🏠</Text>
+                            </TouchableOpacity>
+                        </View>
                         <View style={s.connBadge}>
                             <View style={s.connDot} />
                             <Text style={s.connText}>
@@ -152,9 +158,7 @@ export default function GreetingInput({ navigation, route }) {
                             {error
                                 ? <Text style={s.errorText}>{error}</Text>
                                 : <Text style={s.hintText}>
-                                    {isEnglishOnly
-                                        ? '✓ English · max 60 chars'
-                                        : '⚠️ Non-English · max 30 chars'}
+                                    {isEnglishOnly ? '✓ English · max 80 chars' : '⚠️ Non-English · max 40 chars'}
                                 </Text>
                             }
                             <Text style={[s.counter, remaining < 5 && s.counterWarn]}>{remaining}</Text>

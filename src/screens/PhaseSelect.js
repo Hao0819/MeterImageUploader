@@ -6,12 +6,12 @@ export default function PhaseSelect({ navigation, route }) {
     const { device, deviceName } = route.params;
 
     // ✅ Go directly to Camera (Profile image), not ImageTypeSelect
-    const go = (phase) => navigation.navigate('Camera', { device, deviceName, phase });
+    const go = (phase) => navigation.navigate('UpdateTypeSelect', { device, deviceName, phase });
 
     return (
         <SafeAreaView style={s.container}>
             <View style={s.header}>
-                <TouchableOpacity onPress={() => navigation.goBack()} style={s.back}>
+                <TouchableOpacity onPress={() => navigation.navigate('BleScanner')} style={s.back}>
                     <Text style={s.backText}>‹ Back</Text>
                 </TouchableOpacity>
                 <View style={s.connBadge}>

@@ -19,6 +19,7 @@ import CameraScreen from './src/screens/CameraScreen';
 import GreetingInput from './src/screens/GreetingInput';
 import CropSend from './src/screens/CropSend';
 import LogViewer from './src/screens/LogViewer';
+import UpdateTypeSelect from './src/screens/UpdateTypeSelect';
 const Stack = createNativeStackNavigator();
 
 export default function App() {
@@ -45,7 +46,7 @@ export default function App() {
 
         {/* Step 5 — Crop preview + send Profile+Greeting together */}
         <Stack.Screen name="CropSend" component={CropSend} />
-        
+        <Stack.Screen name="UpdateTypeSelect" component={UpdateTypeSelect} />
         <Stack.Screen name="LogViewer" component={LogViewer} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>

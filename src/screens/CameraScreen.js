@@ -28,7 +28,7 @@ async function requestSavePermission() {
 }
 
 export default function CameraScreen({ navigation, route }) {
-    const { device: bleDevice, deviceName, phase } = route.params;
+    const { device: bleDevice, deviceName, phase, updateType = 'both' } = route.params;
 
     const cam = useRef(null);
     const [cameraPosition, setCameraPosition] = useState('back');
@@ -105,13 +105,32 @@ export default function CameraScreen({ navigation, route }) {
         lastZoom.current = 1;
     };
 
+
+    // REPLACE afterCrop with this:
     const afterCrop = (uri) => {
-        navigation.navigate('GreetingInput', {
-            device: bleDevice,
-            deviceName,
-            phase,
-            imageUri: uri,
-        });
+        if (updateType === 'profile') {
+            // Profile only — skip GreetingInput, go straight to CropSend
+            // Pass empty greetingBytes; firmware preserves existing greeting
+            const { GREETING_MONO_BYTES } = require('../utils/ImageConverter');
+            navigation.navigate('CropSend', {
+                device: bleDevice,
+                deviceName,
+                phase,
+                imageUri: uri,
+                greetingText: '',
+                greetingBytes: Array(GREETING_MONO_BYTES).fill(0),
+                updateType,
+            });
+        } else {
+            // 'both' — normal flow through GreetingInput
+            navigation.navigate('GreetingInput', {
+                device: bleDevice,
+                deviceName,
+                phase,
+                imageUri: uri,
+                updateType,
+            });
+        }
     };
 
     const shoot = async () => {
@@ -227,7 +246,9 @@ export default function CameraScreen({ navigation, route }) {
                 <View style={styles.topTitlePill}>
                     <Text style={styles.topTitle}>Profile · {PROFILE_W}×{PROFILE_H}</Text>
                 </View>
-                <View style={{ width: 44 }} />
+                <TouchableOpacity onPress={() => navigation.navigate('PhaseSelect', { device: bleDevice, deviceName })} style={styles.topBtn}>
+                    <Text style={styles.topBtnTxt}>🏠</Text>
+                </TouchableOpacity>
             </SafeAreaView>
 
             {/* Bottom bar */}

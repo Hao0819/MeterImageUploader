@@ -8,16 +8,21 @@ export default function GreetingRenderer({ text, viewRef }) {
     const hasChinese = /[\u4E00-\u9FFF]/.test(text);
     const charCount = text.length;
 
-    // 128x128 空间更大，字体调大
-    let fontSize = 20;
-    if (charCount > 80) fontSize = 11;
-    else if (charCount > 60) fontSize = 13;
-    else if (charCount > 40) fontSize = 15;
-    else if (charCount > 20) fontSize = 17;
-
-    // 中文/阿拉伯字符较宽，稍微缩小避免截断
-    if (hasChinese || hasArabic) fontSize = Math.max(fontSize - 2, 11);
-
+    let fontSize = 22;
+    if (hasChinese || hasArabic) {
+        // 中文/阿拉伯文，最多40字
+        if (charCount > 30) fontSize = 14;
+        else if (charCount > 20) fontSize = 16;
+        else if (charCount > 10) fontSize = 19;
+        else fontSize = 24;
+    } else {
+        // 英文，最多100字
+        if (charCount > 80) fontSize = 13;
+        else if (charCount > 60) fontSize = 15;
+        else if (charCount > 40) fontSize = 17;
+        else if (charCount > 20) fontSize = 20;
+        else fontSize = 24;
+    }
     return (
         <View
             ref={viewRef}
@@ -26,7 +31,7 @@ export default function GreetingRenderer({ text, viewRef }) {
         >
             <Text style={[
                 styles.text,
-                { fontSize, lineHeight: fontSize + 8 },
+                { fontSize, lineHeight: fontSize + 2 },
                 hasArabic && styles.rtlText,
             ]}>
                 {text}
@@ -41,8 +46,8 @@ const styles = StyleSheet.create({
         height: GREETING_H,  // 128
         backgroundColor: 'white',
         alignItems: 'center',
-        justifyContent: 'center',
-        padding: 8,
+        justifyContent: 'flex-start',
+        padding: 4,
     },
     text: {
         color: 'black',

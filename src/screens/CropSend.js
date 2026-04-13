@@ -6,13 +6,17 @@ import {
 } from 'react-native';
 import RNFS from 'react-native-fs';
 import { Buffer } from 'buffer';
-
+import { unstable_batchedUpdates } from 'react-native';
 import {
     sendCombined,
     disconnectDevice,
+    getManager,
     PROFILE_PACKETS,
+    PROFILE_LOGIC_PACKETS,
     GREETING_PACKETS,
     GREETING_START_COUNTER,
+    PROFILE_BYTES_TOTAL,
+    GREETING_BYTES_TOTAL,
 } from '../utils/ble';
 
 import {
@@ -30,6 +34,37 @@ const STATUS = {
     ERROR: 'error',
 };
 
+import { Clipboard } from 'react-native';
+
+const ProgressBar = React.memo(({ sent, total, updateType }) => {
+    const pct = total > 0 ? Math.round((sent / total) * 100) : 0;
+    const expectedTotal =
+        (updateType === 'greeting' ? 0 : PROFILE_PACKETS) +
+        (updateType === 'profile' ? 0 : GREETING_PACKETS);
+    const totalWrites = total || expectedTotal;
+    const profileSent = updateType === 'greeting'
+        ? 0 : Math.min(sent, PROFILE_PACKETS);
+    const profilePct = profileSent / totalWrites * 100;
+    const greetingPct = Math.max(0, sent - (updateType === 'greeting' ? 0 : PROFILE_PACKETS))
+        / totalWrites * 100;
+    const greetingLeft = (updateType === 'greeting' ? 0 : PROFILE_PACKETS) / totalWrites * 100;
+
+    return (
+        <View style={s.progCard}>
+            <View style={s.progTrack}>
+                <View style={[s.progFillProfile, { width: `${profilePct}%` }]} />
+                <View style={[s.progFillGreeting, { left: `${greetingLeft}%`, width: `${greetingPct}%` }]} />
+            </View>
+            <Text style={s.progTxt}>
+                {sent} / {total} packets ({pct}%)
+                {updateType === 'greeting' ? '  👋 Greeting'
+                    : updateType === 'profile' ? '  🖼️ Profile'
+                        : sent >= PROFILE_PACKETS ? '  👋 Greeting' : '  🖼️ Profile'}
+            </Text>
+        </View>
+    );
+});
+
 export default function CropSend({ navigation, route }) {
     const {
         device,
@@ -37,7 +72,8 @@ export default function CropSend({ navigation, route }) {
         phase,
         imageUri,
         greetingText = '',
-        greetingBytes: greetingBytesArray,
+        greetingBytes: greetingBytesArray = [],
+        updateType = 'both'
     } = route.params;
 
     const [status, setStatus] = useState(STATUS.IDLE);
@@ -46,9 +82,15 @@ export default function CropSend({ navigation, route }) {
     const [progress, setProgress] = useState({ sent: 0, total: 0 });
     const [log, setLog] = useState([]);
     const [hexText, setHexText] = useState('');
+    const [isConnected, setIsConnected] = useState(true); // ← 加这行
+    const cancelRef = useRef(false);
+    const isConnectedRef = useRef(true);        // ← 加
+    const [isReconnecting, setIsReconnecting] = useState(false); // ← 加
     const packetLogsRef = useRef([]);
     const logBufferRef = useRef([]);
     const logScrollRef = useRef(null);
+    const profileBytesRef = useRef(null);   // ← 加
+    const greetingBytesRef = useRef(null);  // ← 加
     const [hasLogs, setHasLogs] = useState(false);
     const addLog = useCallback((msg) => {
         logBufferRef.current.push(`[${new Date().toLocaleTimeString()}] ${msg}`);
@@ -60,86 +102,201 @@ export default function CropSend({ navigation, route }) {
     }, []);
 
     // ── Convert on mount ──────────────────────────────────────────
+    // const convert = useCallback(async () => {
+    //     setStatus(STATUS.CONVERTING);
+    //     try {
+    //         // 1) Profile: read file → RGB565
+    //         addLog('Reading profile image…');
+    //         const b64 = await RNFS.readFile(imageUri, 'base64');
+    //         const buf = Buffer.from(b64, 'base64');
+    //         addLog(`File size: ${buf.length} bytes`);
+
+    //         const pBytes = await convertProfileBuffer(buf);
+    //         setProfileBytes(pBytes);
+    //         addLog(`✅ Profile converted: ${pBytes.length} bytes (${PROFILE_W}×${PROFILE_H} RGB565)`);
+
+    //         // 2) Greeting: already converted in GreetingInput
+    //         const gBytes = new Uint8Array(greetingBytesArray);
+    //         setGreetingBytes(gBytes);
+    //         addLog(`greetingBytesArray type: ${typeof greetingBytesArray}, length: ${greetingBytesArray?.length}`);
+    //         addLog(`gBytes first 4: ${gBytes[0]} ${gBytes[1]} ${gBytes[2]} ${gBytes[3]}`);
+    //         addLog(`✅ Greeting ready: ${gBytes.length} bytes (${GREETING_W}×${GREETING_H} mono1)`);
+    //         addLog(`gBytes first 8: ${Array.from(gBytes.slice(0, 8)).join(',')}`);
+    //         addLog(`gBytes last 8: ${Array.from(gBytes.slice(-8)).join(',')}`);
+    //         const nonZero = gBytes.filter(b => b !== 0).length;
+    //         addLog(`Non-zero bytes: ${nonZero} / ${gBytes.length}`);
+    //         // 3) Hex preview of the combined 24KB buffer layout
+    //         addLog(`📐 Layout: Profile counter 000–255 | Greeting counter 896–911`);
+
+    //         setStatus(STATUS.IDLE);
+    //     } catch (err) {
+    //         addLog('ERROR: ' + err.message);
+    //         setStatus(STATUS.ERROR);
+    //     } finally {
+    //         flushLog();
+    //     }
+    // }, [imageUri, greetingBytesArray, addLog, flushLog]);
+
     const convert = useCallback(async () => {
         setStatus(STATUS.CONVERTING);
         try {
-            // 1) Profile: read file → RGB565
-            addLog('Reading profile image…');
-            const b64 = await RNFS.readFile(imageUri, 'base64');
-            const buf = Buffer.from(b64, 'base64');
-            addLog(`File size: ${buf.length} bytes`);
+            // ── Profile ──────────────────────────────────────────
+            if (updateType === 'greeting') {
+                const p = new Uint8Array(PROFILE_RGB565_BYTES);
+                profileBytesRef.current = p;  
+                setProfileBytes(p);
+                addLog(`ℹ️ Profile skipped (greeting-only) — zero-filled`);
+            } else {
+                addLog('Reading profile image…');
+                const b64 = await RNFS.readFile(imageUri, 'base64');
+                const buf = Buffer.from(b64, 'base64');
+                addLog(`File size: ${buf.length} bytes`);
+                const pBytes = await convertProfileBuffer(buf);
+                profileBytesRef.current = pBytes;  
+                setProfileBytes(pBytes);
+                addLog(`✅ Profile converted: ${pBytes.length} bytes (${PROFILE_W}×${PROFILE_H} RGB565)`);
+            }
 
-            const pBytes = await convertProfileBuffer(buf);
-            setProfileBytes(pBytes);
-            addLog(`✅ Profile converted: ${pBytes.length} bytes (${PROFILE_W}×${PROFILE_H} RGB565)`);
+            // ── Greeting ─────────────────────────────────────────
+            if (updateType === 'profile') {
+                const g = new Uint8Array(GREETING_MONO_BYTES);
+                greetingBytesRef.current = g;       // ← 加
+                setGreetingBytes(g);
+                addLog(`ℹ️ Greeting skipped (profile-only) — zero-filled`);
+            } else {
+                const gBytes = new Uint8Array(greetingBytesArray);
+                greetingBytesRef.current = gBytes;  // ← 加
+                setGreetingBytes(gBytes);
+                addLog(`✅ Greeting ready: ${gBytes.length} bytes (${GREETING_W}×${GREETING_H} mono1)`);
+                const nonZero = gBytes.filter(b => b !== 0).length;
+                addLog(`Non-zero bytes: ${nonZero} / ${gBytes.length}`);
+            }
 
-            // 2) Greeting: already converted in GreetingInput
-            const gBytes = new Uint8Array(greetingBytesArray);
-            setGreetingBytes(gBytes);
-            addLog(`greetingBytesArray type: ${typeof greetingBytesArray}, length: ${greetingBytesArray?.length}`);
-            addLog(`gBytes first 4: ${gBytes[0]} ${gBytes[1]} ${gBytes[2]} ${gBytes[3]}`);
-            addLog(`✅ Greeting ready: ${gBytes.length} bytes (${GREETING_W}×${GREETING_H} mono1)`);
-            addLog(`gBytes first 8: ${Array.from(gBytes.slice(0, 8)).join(',')}`);
-            addLog(`gBytes last 8: ${Array.from(gBytes.slice(-8)).join(',')}`);
-            const nonZero = gBytes.filter(b => b !== 0).length;
-            addLog(`Non-zero bytes: ${nonZero} / ${gBytes.length}`);
-            // 3) Hex preview of the combined 24KB buffer layout
             addLog(`📐 Layout: Profile counter 000–255 | Greeting counter 896–911`);
-
             setStatus(STATUS.IDLE);
         } catch (err) {
+            profileBytesRef.current = null;   
+            greetingBytesRef.current = null;  
             addLog('ERROR: ' + err.message);
             setStatus(STATUS.ERROR);
         } finally {
             flushLog();
         }
-    }, [imageUri, greetingBytesArray, addLog, flushLog]);
-
+    }, [imageUri, greetingBytesArray, updateType, addLog, flushLog]);
     useEffect(() => { convert(); }, [convert]);
 
+    useEffect(() => {
+        const mgr = getManager();
+        const sub = mgr.onDeviceDisconnected(device.id, () => {
+            setIsConnected(false);
+            isConnectedRef.current = false; // ← 加
+            addLog('⚠️ Device disconnected');
+            flushLog();
+        });
+        return () => sub.remove();
+    }, [device.id]);
+    // const send = useCallback(async () => {
+    //     if (!profileBytes || !greetingBytes) return;
+
+    //     logBufferRef.current = [];
+    //     setLog([]);
+    //     setStatus(STATUS.SENDING);
+    //     setProgress({ sent: 0, total: 0 });
+    //     addLog('Sending START command…');
+    //     flushLog();
+
+    //     try {
+    //         const packetLogs = [];
+    //         flushLog();
+
+    //         const finalProfileBytes = updateType === 'greeting' ? new Uint8Array(PROFILE_BYTES_TOTAL) : profileBytes;
+    //         const finalGreetingBytes = updateType === 'profile' ? new Uint8Array(GREETING_BYTES_TOTAL) : greetingBytes;
+
+    //         await sendCombined(device, finalProfileBytes, finalGreetingBytes, (sent, total, counter, packet, errorMsg) => {
+    //             setProgress({ sent, total });
+
+    //             const section = counter >= GREETING_START_COUNTER ? '👋' : '🖼️ ';
+
+    //             if (errorMsg) {
+    //                 addLog(errorMsg);
+    //                 flushLog();
+    //             }
+
+    //             const hex = Array.from(packet.slice(0, 16))
+    //                 .map(b => b.toString(16).padStart(2, '0').toUpperCase())
+    //                 .join(' ');
+    //             packetLogs.push(`${section} CTR:${counter.toString(16).toUpperCase().padStart(4, '0')} | ${hex}`);
+    //             packetLogsRef.current = packetLogs;
+    //             if (sent === 1) setHasLogs(true);
+    //             if (sent % 20 === 0 || sent === total) {
+    //                 addLog(`${section} ${sent}/${total} packets sent...`);
+    //                 flushLog();
+    //             }
+    //         });
+
+    //         addLog('✅ Transfer complete!');
+    //         setStatus(STATUS.DONE);
+    //         packetLogsRef.current = packetLogs;
+
+    //     } catch (err) {
+    //         addLog('Send error: ' + err.message);
+    //         setStatus(STATUS.ERROR);
+    //     } finally {
+    //         flushLog();
+    //     }
+    // }, [device, profileBytes, greetingBytes, updateType, addLog, flushLog]);
+
     const send = useCallback(async () => {
-        if (!profileBytes || !greetingBytes) return;
+        cancelRef.current = false;
+        const pBytes = profileBytesRef.current;   // ← 从 ref 取
+        const gBytes = greetingBytesRef.current;  // ← 从 ref 取
+
+        if (!pBytes && !gBytes) return;
 
         logBufferRef.current = [];
-        setLog([]);
-        setStatus(STATUS.SENDING);
-        setProgress({ sent: 0, total: 0 });
+        unstable_batchedUpdates(() => {
+            setLog([]);
+            setStatus(STATUS.SENDING);
+            setHasLogs(false);
+        });
         addLog('Sending START command…');
         flushLog();
 
         try {
             const packetLogs = [];
-         flushLog();
-            await sendCombined(device, profileBytes, greetingBytes, (sent, total, counter, packet, errorMsg) => {
-            // const testBytes = new Uint8Array(2048).map((_, i) => i % 2 === 0 ? 0xFF : 0x00);
-            // await sendCombined(device, profileBytes, testBytes, (sent, total, counter, packet, errorMsg) => {
-                setProgress({ sent, total });
 
-                const section = counter >= GREETING_START_COUNTER ? '👋' : '🖼️ ';
+            const finalProfileBytes = updateType === 'greeting' ? null : pBytes;
+            const finalGreetingBytes = updateType === 'profile' ? null : gBytes;
 
-                // Errors are displayed directly in the CropSend log.
-                if (errorMsg) {
-                    addLog(errorMsg);
-                    flushLog();
+            await sendCombined(device, finalProfileBytes, finalGreetingBytes,
+                (sent, total, counter, packet, errorMsg) => {
+                    if (cancelRef.current) throw new Error('Cancelled by user');
+                    const section = counter >= GREETING_START_COUNTER ? '👋' : '🖼️ ';
+
+                    if (errorMsg) addLog(errorMsg);
+
+                    if (!packet) return;
+
+                    const hex = Array.from(packet.slice(0, 16))
+                        .map(b => b.toString(16).padStart(2, '0').toUpperCase())
+                        .join(' ');
+                    packetLogs.push(`${section} CTR:${counter.toString(16).toUpperCase().padStart(4, '0')} | ${hex}`);
+                    packetLogsRef.current = packetLogs;
+
+                    unstable_batchedUpdates(() => {
+                        setProgress({ sent, total });
+                        if (sent === 1) setHasLogs(true);
+                    });
+
+                    if (sent % 20 === 0 || sent === total) {
+                        addLog(`${section} ${sent}/${total} packets sent...`);
+                        flushLog(); // 只在这里 flush
+                    }
                 }
+            );
 
-                const hex = Array.from(packet.slice(0, 16))
-                    .map(b => b.toString(16).padStart(2, '0').toUpperCase())
-                    .join(' ');
-                packetLogs.push(`${section} CTR:${counter.toString(16).toUpperCase().padStart(4, '0')} | ${hex}`);
-                 packetLogsRef.current = packetLogs;  // ← 加这行
-                 if (sent === 1) setHasLogs(true);    // ← 加这行
-                if (sent % 20 === 0 || sent === total) {
-                    addLog(`${section} ${sent}/${total} packets sent...`);
-                    flushLog();
-                }
-            });
-
-            // packetLogs are sent to LogViewer, but not added to the CropSend log.
             addLog('✅ Transfer complete!');
             setStatus(STATUS.DONE);
-            // Store it in ref for LogViewer to use.
-            packetLogsRef.current = packetLogs;
 
         } catch (err) {
             addLog('Send error: ' + err.message);
@@ -147,39 +304,89 @@ export default function CropSend({ navigation, route }) {
         } finally {
             flushLog();
         }
-    }, [device, profileBytes, greetingBytes, addLog, flushLog]);
-    
+    }, [device, updateType, addLog, flushLog]); // ← profileBytes/greetingBytes 从 deps 移除
     const disconnect = async () => {
         await disconnectDevice(device);
         navigation.popToTop();
+    };
+
+    const reconnect = async () => {
+        setIsReconnecting(true);
+        addLog('🔄 Connecting...');
+        flushLog();
+        try {
+            const mgr = getManager();
+            let reconnected = await mgr.connectToDevice(device.id, { timeout: 10000 });
+            reconnected = await reconnected.discoverAllServicesAndCharacteristics();
+            try {
+                if (Platform.OS === 'android' && reconnected.requestMTU) {
+                    await reconnected.requestMTU(247);
+                }
+            } catch (_) { }
+            setIsConnected(true);
+            isConnectedRef.current = true; // ← 同步 ref
+            addLog('✅ Connected!');
+            flushLog();
+        } catch (err) {
+            addLog('❌ Connect failed: ' + err.message);
+            flushLog();
+        } finally {
+            setIsReconnecting(false);
+        }
+    };
+
+    const handleResend = async () => {
+        if (!isConnectedRef.current) {
+            await reconnect();
+            if (!isConnectedRef.current) return; // 重连失败就不跳
+        }
+        navigation.navigate('UpdateTypeSelect', { device, deviceName, phase });
     };
 
     const pct = progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0;
     const busy = status === STATUS.SENDING || status === STATUS.CONVERTING;
     const ready = profileBytes && greetingBytes;
 
-    // Progress: blue = profile packets, orange = greeting packets
-    const totalWrites = PROFILE_PACKETS + GREETING_PACKETS;
-    const profilePct = Math.min(progress.sent, PROFILE_PACKETS) / totalWrites * 100;
-    const greetingPct = Math.max(0, progress.sent - PROFILE_PACKETS) / totalWrites * 100;
-    const greetingLeft = PROFILE_PACKETS / totalWrites * 100;
+    
     return (
         <SafeAreaView style={s.container}>
             <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
                 {/* Header */}
                 <View style={s.header}>
-                    <TouchableOpacity onPress={() => navigation.goBack()} disabled={busy}>
-                        <Text style={[s.back, busy && s.dimText]}>‹ Back</Text>
-                    </TouchableOpacity>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <TouchableOpacity onPress={() => navigation.goBack()} disabled={busy}>
+                            <Text style={[s.back, busy && s.dimText]}>‹ Back</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => navigation.navigate('PhaseSelect', { device, deviceName })} disabled={busy}>
+                            <Text style={{ fontSize: 22, opacity: busy ? 0.4 : 1 }}>🏠</Text>
+                        </TouchableOpacity>
+                    </View>
                     <View style={s.deviceBar}>
                         <View style={s.deviceLeft}>
-                            <View style={s.connDot} />
-                            <Text style={s.connText} numberOfLines={1}>{deviceName}</Text>
+                            <View style={[s.connDot, { backgroundColor: isConnected ? '#22c55e' : '#ef4444' }]} />
+                            <View style={{ flexShrink: 1 }}>
+                                <Text style={s.connText} numberOfLines={1}>{deviceName}</Text>
+                                {device?.id && (
+                                    <Text style={s.connId} numberOfLines={1}>{device.id}</Text>
+                                )}
+                            </View>
                         </View>
-                        <TouchableOpacity onPress={disconnect} disabled={busy}>
-                            <Text style={[s.discText, busy && s.dimText]}>Disconnect</Text>
-                        </TouchableOpacity>
+                        {isConnected ? (
+                            <TouchableOpacity onPress={disconnect} disabled={busy}>
+                                <Text style={[s.discText, busy && s.dimText]}>Disconnect</Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity
+                                onPress={reconnect}
+                                disabled={isReconnecting || busy}
+                                style={{ backgroundColor: '#16a34a', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, opacity: isReconnecting ? 0.5 : 1 }}
+                            >
+                                <Text style={{ color: '#fff', fontSize: 12, fontWeight: '700' }}>
+                                    {isReconnecting ? 'Connecting...' : 'Connect'}
+                                </Text>
+                            </TouchableOpacity>
+                        )}
                     </View>
                 </View>
 
@@ -188,34 +395,41 @@ export default function CropSend({ navigation, route }) {
                     <Text style={s.cardTitle}>Preview & send</Text>
 
                     {/* Profile image */}
-                    <View style={s.previewSection}>
-                        <Text style={s.previewSectionLabel}>🖼️  Profile · {PROFILE_W}×{PROFILE_H} RGB565</Text>
-                        <Image
-                            source={{ uri: imageUri }}
-                            style={s.profileImg}
-                            resizeMode="cover"
-                        />
-                    </View>
+                    {updateType !== 'greeting' && (
+                        <View style={s.previewSection}>
+                            <Text style={s.previewSectionLabel}>🖼️  Profile · {PROFILE_W}×{PROFILE_H} RGB565</Text>
+                            <Image
+                                source={{ uri: imageUri }}
+                                style={s.profileImg}
+                                resizeMode="cover"
+                            />
+                        </View>
+                    )}
 
                     {/* Greeting text */}
-                    <View style={s.previewSection}>
-                        <Text style={s.previewSectionLabel}>👋 Greeting · {GREETING_W}×{GREETING_H} mono1</Text>
-                        <View style={s.lcdPreview}>
-                            <Text style={[
-                                s.lcdText,
-                                /[\u0600-\u06FF]/.test(greetingText) && {
-                                    textAlign: 'right',
-                                    writingDirection: 'rtl',
-                                }
-                            ]}>{greetingText}</Text>
+                    {updateType !== 'profile' && (
+                        <View style={s.previewSection}>
+                            <Text style={s.previewSectionLabel}>👋 Greeting · {GREETING_W}×{GREETING_H} mono1</Text>
+                            <View style={s.lcdPreview}>
+                                <Text style={[
+                                    s.lcdText,
+                                    /[\u0600-\u06FF]/.test(greetingText) && {
+                                        textAlign: 'right',
+                                        writingDirection: 'rtl',
+                                    }
+                                ]}>{greetingText}</Text>
+                            </View>
                         </View>
-                    </View>
+                    )}
 
                     {/* Info rows */}
                     <View style={s.infoGrid}>
                         <InfoRow k="Profile bytes" v={profileBytes ? profileBytes.length.toLocaleString() : '—'} />
                         <InfoRow k="Greeting bytes" v={greetingBytes ? greetingBytes.length.toLocaleString() : '—'} />
-                        <InfoRow k="Total packets" v={String(PROFILE_PACKETS + GREETING_PACKETS)} />
+                        <InfoRow k="Total packets" v={String(
+                            (updateType === 'greeting' ? 0 : PROFILE_PACKETS) +
+                            (updateType === 'profile' ? 0 : GREETING_PACKETS)
+                        )} />
                         <InfoRow k="Phase" v={phase === 'single' ? 'Single' : '3-Phase'} />
                     </View>
 
@@ -246,18 +460,23 @@ export default function CropSend({ navigation, route }) {
                     </TouchableOpacity>
                 )}
 
-                {/* Progress bar (two-colour: blue=profile, orange=greeting) */}
+                {/* ← 加这个 Cancel 按钮 */}
                 {status === STATUS.SENDING && (
-                    <View style={s.progCard}>
-                        <View style={s.progTrack}>
-                            <View style={[s.progFillProfile, { width: `${profilePct}%` }]} />
-                            <View style={[s.progFillGreeting, { left: `${greetingLeft}%`, width: `${greetingPct}%` }]} />
-                        </View>
-                        <Text style={s.progTxt}>
-                            {progress.sent} / {progress.total} packets ({pct}%)
-                            {progress.sent >= PROFILE_PACKETS ? '  👋 Greeting' : '  🖼️ Profile'}
-                        </Text>
-                    </View>
+                    <TouchableOpacity
+                        style={[s.sendBtn, { backgroundColor: '#dc2626', marginTop: -8 }]}
+                        onPress={() => { cancelRef.current = true; }}
+                    >
+                        <Text style={s.sendTxt}>Cancel</Text>
+                    </TouchableOpacity>
+                )}
+
+                {/* Progress bar (two-colour: blue=profile, orange=greeting) */}
+                {(status === STATUS.SENDING || status === STATUS.DONE) && (
+                    <ProgressBar
+                        sent={progress.sent}
+                        total={progress.total}
+                        updateType={updateType}
+                    />
                 )}
 
                 {/* Done card */}
@@ -265,9 +484,13 @@ export default function CropSend({ navigation, route }) {
                     <View style={s.doneCard}>
                         <Text style={s.doneTxt}>✅ Transfer complete!</Text>
                         <View style={{ flexDirection: 'row', gap: 10 }}>
+                            {/* Resend button */}
+                            <TouchableOpacity onPress={handleResend} style={s.doneBtn}>
+                                <Text style={s.doneBtnTxt}>🔄 Resend</Text>
+                            </TouchableOpacity>
                             <TouchableOpacity
                                 onPress={() => navigation.popToTop()}
-                                style={s.doneBtn}
+                                style={[s.doneBtn, { backgroundColor: '#64748b' }]}
                             >
                                 <Text style={s.doneBtnTxt}>Start over</Text>
                             </TouchableOpacity>
@@ -286,7 +509,17 @@ export default function CropSend({ navigation, route }) {
                 )}
 
                 {/* Log */}
-                <Text style={s.logLabel}>Log ({log.length} lines)</Text>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <Text style={s.logLabel}>Log ({log.length} lines)</Text>
+                    {log.length > 0 && (
+                        <TouchableOpacity
+                            onPress={() => Clipboard.setString(log.join('\n'))}
+                            style={{ backgroundColor: '#e2e8f0', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 8 }}
+                        >
+                            <Text style={{ fontSize: 11, color: '#475569', fontWeight: '600' }}>Copy</Text>
+                        </TouchableOpacity>
+                    )}
+                </View>
                 <View style={s.logBox}>
                     <ScrollView
                         ref={logScrollRef}
@@ -330,6 +563,7 @@ const s = StyleSheet.create({
     deviceLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 12 },
     connDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#22c55e', marginRight: 8 },
     connText: { fontSize: 13, color: '#0f172a', fontWeight: '600', flexShrink: 1 },
+    connId: { fontSize: 10, color: '#94a3b8', fontFamily: 'monospace', marginTop: 1, flexShrink: 1 },
     discText: { fontSize: 12, color: '#dc2626', fontWeight: '600' },
 
     previewCard: {
