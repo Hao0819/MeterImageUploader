@@ -5,8 +5,8 @@ import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, Alert } from 'r
 export default function PhaseSelect({ navigation, route }) {
     const { device, deviceName } = route.params;
 
-    // ✅ Go directly to Camera (Profile image), not ImageTypeSelect
-    const go = (phase) => navigation.navigate('UpdateTypeSelect', { device, deviceName, phase });
+    // Navigate to ModeSelect, passing phase forward
+    const go = (phase) => navigation.navigate('ModeSelect', { device, deviceName, phase });
 
     return (
         <SafeAreaView style={s.container}>

@@ -108,9 +108,15 @@ export default function CameraScreen({ navigation, route }) {
 
     // REPLACE afterCrop with this:
     const afterCrop = (uri) => {
+        // ─── 加这3行 ──────────────────────────────────────────
+        if (route.params?.onImageCaptured) {
+            route.params.onImageCaptured(uri);
+            navigation.goBack();
+            return;
+        }
+        // ─────────────────────────────────────────────────────
+
         if (updateType === 'profile') {
-            // Profile only — skip GreetingInput, go straight to CropSend
-            // Pass empty greetingBytes; firmware preserves existing greeting
             const { GREETING_MONO_BYTES } = require('../utils/ImageConverter');
             navigation.navigate('CropSend', {
                 device: bleDevice,
@@ -122,7 +128,6 @@ export default function CameraScreen({ navigation, route }) {
                 updateType,
             });
         } else {
-            // 'both' — normal flow through GreetingInput
             navigation.navigate('GreetingInput', {
                 device: bleDevice,
                 deviceName,

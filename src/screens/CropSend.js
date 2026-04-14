@@ -292,7 +292,7 @@ export default function CropSend({ navigation, route }) {
                         addLog(`${section} ${sent}/${total} packets sent...`);
                         flushLog(); // 只在这里 flush
                     }
-                }
+                }, updateType
             );
 
             addLog('✅ Transfer complete!');

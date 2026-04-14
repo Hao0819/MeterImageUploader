@@ -2,24 +2,33 @@
  * App.js
  *
  * Flow:
- *   BleScanner → PhaseSelect → CameraScreen → GreetingInput → CropSend
+ *   BleScanner → PhaseSelect → ModeSelect → [Mode 0: reset done]
+ *                                          → [Mode 1: UpdateTypeSelect → Camera/GreetingInput → CropSend]
+ *                                          → [Mode 2: Mode2Flow (P1→P2→S1→S2→S3)]
  *
  * Params passed forward:
- *   PhaseSelect  receives: { device, deviceName }
- *   CameraScreen receives: { device, deviceName, phase }
- *   GreetingInput receives: { device, deviceName, phase, imageUri }
- *   CropSend      receives: { device, deviceName, phase, imageUri, greetingText, greetingBytes }
+ *   PhaseSelect      receives: { device, deviceName }
+ *   ModeSelect       receives: { device, deviceName, phase }
+ *   UpdateTypeSelect receives: { device, deviceName, phase }
+ *   CameraScreen     receives: { device, deviceName, phase, updateType }
+ *   GreetingInput    receives: { device, deviceName, phase, imageUri, updateType }
+ *   CropSend         receives: { device, deviceName, phase, imageUri, greetingText, greetingBytes, updateType }
+ *   Mode2Flow        receives: { device, deviceName, phase }
  */
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+
 import BleScanner from './src/screens/BleScanner';
 import PhaseSelect from './src/screens/PhaseSelect';
+import ModeSelect from './src/screens/ModeSelect';
 import CameraScreen from './src/screens/CameraScreen';
 import GreetingInput from './src/screens/GreetingInput';
 import CropSend from './src/screens/CropSend';
 import LogViewer from './src/screens/LogViewer';
 import UpdateTypeSelect from './src/screens/UpdateTypeSelect';
+import Mode2Flow from './src/screens/Mode2Flow';
+
 const Stack = createNativeStackNavigator();
 
 export default function App() {
@@ -38,15 +47,25 @@ export default function App() {
         {/* Step 2 — Select phase (single / 3-phase) */}
         <Stack.Screen name="PhaseSelect" component={PhaseSelect} />
 
-        {/* Step 3 — Take photo or pick from gallery (Profile 95×110) */}
+        {/* Step 3 — Select mode (0=Reset, 1=Normal, 2=Extended) */}
+        <Stack.Screen name="ModeSelect" component={ModeSelect} />
+
+        {/* Mode 1: Select update type (profile / greeting / both) */}
+        <Stack.Screen name="UpdateTypeSelect" component={UpdateTypeSelect} />
+
+        {/* Mode 1: Take photo or pick from gallery */}
         <Stack.Screen name="Camera" component={CameraScreen} />
 
-        {/* Step 4 — Type greeting text */}
+        {/* Mode 1: Type greeting text */}
         <Stack.Screen name="GreetingInput" component={GreetingInput} />
 
-        {/* Step 5 — Crop preview + send Profile+Greeting together */}
+        {/* Mode 1: Crop preview + send Profile+Greeting together */}
         <Stack.Screen name="CropSend" component={CropSend} />
-        <Stack.Screen name="UpdateTypeSelect" component={UpdateTypeSelect} />
+
+        {/* Mode 2: Multi-page upload (P1 → P2 → S1 → S2 → S3) */}
+        <Stack.Screen name="Mode2Flow" component={Mode2Flow} />
+
+        {/* Shared: Packet log viewer */}
         <Stack.Screen name="LogViewer" component={LogViewer} options={{ headerShown: false }} />
       </Stack.Navigator>
     </NavigationContainer>
