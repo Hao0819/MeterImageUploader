@@ -36,30 +36,18 @@ const STATUS = {
 
 import { Clipboard } from 'react-native';
 
-const ProgressBar = React.memo(({ sent, total, updateType }) => {
+const ProgressBar = React.memo(({ sent, total, page, updateType }) => {
     const pct = total > 0 ? Math.round((sent / total) * 100) : 0;
-    const expectedTotal =
-        (updateType === 'greeting' ? 0 : PROFILE_PACKETS) +
-        (updateType === 'profile' ? 0 : GREETING_PACKETS);
-    const totalWrites = total || expectedTotal;
-    const profileSent = updateType === 'greeting'
-        ? 0 : Math.min(sent, PROFILE_PACKETS);
-    const profilePct = profileSent / totalWrites * 100;
-    const greetingPct = Math.max(0, sent - (updateType === 'greeting' ? 0 : PROFILE_PACKETS))
-        / totalWrites * 100;
-    const greetingLeft = (updateType === 'greeting' ? 0 : PROFILE_PACKETS) / totalWrites * 100;
-
     return (
         <View style={s.progCard}>
+            <Text style={s.progressPage}>
+                Sending: <Text style={{ fontWeight: '700', color: '#2563eb' }}>{page}</Text>
+            </Text>
             <View style={s.progTrack}>
-                <View style={[s.progFillProfile, { width: `${profilePct}%` }]} />
-                <View style={[s.progFillGreeting, { left: `${greetingLeft}%`, width: `${greetingPct}%` }]} />
+                <View style={[s.progFill, { width: `${pct}%` }]} />
             </View>
             <Text style={s.progTxt}>
-                {sent} / {total} packets ({pct}%)
-                {updateType === 'greeting' ? '  👋 Greeting'
-                    : updateType === 'profile' ? '  🖼️ Profile'
-                        : sent >= PROFILE_PACKETS ? '  👋 Greeting' : '  🖼️ Profile'}
+                {sent} / {total} packets{total > 0 ? ` (${pct}%)` : ''}
             </Text>
         </View>
     );
@@ -475,6 +463,9 @@ export default function CropSend({ navigation, route }) {
                     <ProgressBar
                         sent={progress.sent}
                         total={progress.total}
+                        page={status === STATUS.SENDING
+                            ? (updateType === 'greeting' ? 'Greeting' : updateType === 'profile' ? 'Profile' : progress.sent >= PROFILE_PACKETS ? 'Greeting' : 'Profile')
+                            : ''}
                         updateType={updateType}
                     />
                 )}
@@ -601,12 +592,13 @@ const s = StyleSheet.create({
     sendTxt: { color: '#ffffff', fontSize: 17, fontWeight: '700' },
     btnDim: { opacity: 0.5 },
 
-    progCard: { backgroundColor: '#ffffff', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 16 },
-    progTrack: { height: 10, backgroundColor: '#e2e8f0', borderRadius: 999, overflow: 'hidden', marginBottom: 8, position: 'relative' },
-    progFillProfile: { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: '#2196F3', borderRadius: 999 },
-    progFillGreeting: { position: 'absolute', top: 0, bottom: 0, backgroundColor: '#f97316', borderRadius: 999 },
-    progTxt: { fontSize: 13, color: '#475569', textAlign: 'center', fontWeight: '500' },
-
+    progCard: {
+        backgroundColor: '#eff6ff', borderRadius: 14, padding: 16,
+        borderWidth: 1, borderColor: '#bfdbfe', marginBottom: 14,
+    },
+    progTrack: { height: 8, backgroundColor: '#bfdbfe', borderRadius: 999, overflow: 'hidden', marginBottom: 6 },
+    progTxt: { fontSize: 12, color: '#1e40af', textAlign: 'center', fontWeight: '500' }, progressPage: { fontSize: 13, color: '#1e40af', marginBottom: 10 },
+    progFill: { height: '100%', backgroundColor: '#2563eb', borderRadius: 999 },
     doneCard: { backgroundColor: '#f0fdf4', borderRadius: 16, padding: 20, alignItems: 'center', marginBottom: 16, borderWidth: 1, borderColor: '#bbf7d0' },
     doneTxt: { fontSize: 18, fontWeight: '700', color: '#15803d', marginBottom: 14 },
     doneBtn: { backgroundColor: '#16a34a', paddingHorizontal: 28, paddingVertical: 12, borderRadius: 12 },

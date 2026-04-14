@@ -10,13 +10,11 @@ export default function GreetingRenderer({ text, viewRef }) {
 
     let fontSize = 22;
     if (hasChinese || hasArabic) {
-        // 中文/阿拉伯文，最多40字
         if (charCount > 30) fontSize = 14;
         else if (charCount > 20) fontSize = 16;
         else if (charCount > 10) fontSize = 19;
         else fontSize = 24;
     } else {
-        // 英文，最多100字
         if (charCount > 80) fontSize = 13;
         else if (charCount > 60) fontSize = 15;
         else if (charCount > 40) fontSize = 17;

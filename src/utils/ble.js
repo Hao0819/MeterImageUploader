@@ -11,9 +11,9 @@ export const CHAR_UUID = CHAR_UUID_CTRL;
 export const CMD_START = new Uint8Array([0xa7, 0x3c, 0xd1, 0x5e]);
 export const CMD_STOP = new Uint8Array([0x9b, 0x42]);
 export const CMD_MODE2 = new Uint8Array([0xa8, 0x3c, 0x37, 0x1b]);
-// 新增这两行
 export const CMD_UPDATE_PROFILE_ONLY = new Uint8Array([0xa9, 0x3c, 0xd1, 0x77]);
 export const CMD_UPDATE_GREETING_ONLY = new Uint8Array([0xa9, 0x3c, 0xd1, 0x78]);
+
 // ─── 协议常量 ────────────────────────────────────────────────────────────────
 export const COUNTER_BYTES = 2;
 export const CHUNK_SIZE = 128;
@@ -29,10 +29,10 @@ export const GREETING_PACKETS = GREETING_LOGIC_PACKETS * 2;
 export const GREETING_BYTES_TOTAL = GREETING_LOGIC_PACKETS * LOGIC_PACKET_SIZE;
 
 // ─── 时间常量 ────────────────────────────────────────────────────────────────
-const PACKET_DELAY_MS = 0;      // ← 改成0，write with response 本身就有等待
-const HALF_PACKET_DELAY_MS = 0; // ← 改成0
-const RETRY_BACKOFF_MS = 10;    // ← retry 间隔改小
-const MAX_WRITE_RETRIES = 20;   // ← 改回20
+const PACKET_DELAY_MS = 0;
+const HALF_PACKET_DELAY_MS = 0;
+const RETRY_BACKOFF_MS = 10;
+const MAX_WRITE_RETRIES = 20;
 const STOP_WAIT_MS = 800;
 
 // ─── Manager singleton ───────────────────────────────────────────────────────
@@ -90,7 +90,6 @@ export async function connectDevice(deviceId, onDisconnect) {
             onDisconnect(err, disconnectedDevice);
         });
     }
-
     return device;
 }
 
@@ -99,16 +98,16 @@ export async function disconnectDevice(device) {
     try { await device?.cancelConnection(); } catch (_) { /* ignore */ }
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function sleep(ms) {
+// ─── Helpers (exported so Mode2Flow and others can import) ───────────────────
+export function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function toBase64(bytes) {
+export function toBase64(bytes) {
     return Buffer.from(bytes).toString('base64');
 }
 
-async function findServiceUuidByCharacteristic(device, characteristicUuid) {
+export async function findServiceUuidByCharacteristic(device, characteristicUuid) {
     const services = await device.services();
     for (const service of services) {
         const chars = await device.characteristicsForService(service.uuid);
@@ -128,29 +127,11 @@ async function writeBytes(device, serviceUuid, charUuid, bytes, withResponse = f
     return device.writeCharacteristicWithoutResponseForService(serviceUuid, charUuid, value);
 }
 
-// async function writeWithRetry(device, serviceUuid, charUuid, bytes, maxRetries = MAX_WRITE_RETRIES, debugLog) {
-//     for (let i = 0; i <= maxRetries; i++) {
-//         try {
-//             await writeBytes(device, serviceUuid, charUuid, bytes, true);
-//             return true;
-//         } catch (err) {
-//             const msg = err.message || '';
-//             // 断线了就不用再 retry，直接放弃
-//             if (msg.includes('not connected') || msg.includes('disconnected')) {
-//                 debugLog?.(`❌ Device disconnected, abort retry`);
-//                 return false;
-//             }
-//             debugLog?.(`⚠️ Write failed (attempt ${i + 1}/${maxRetries}): ${msg}`);
-//             if (i < maxRetries) await sleep(RETRY_BACKOFF_MS);
-//         }
-//     }
-//     return false;
-// }
-async function writeWithRetry(device, serviceUuid, charUuid, bytes, maxRetries = MAX_WRITE_RETRIES, debugLog) {
+export async function writeWithRetry(device, serviceUuid, charUuid, bytes, maxRetries = MAX_WRITE_RETRIES, debugLog) {
     for (let i = 0; i <= maxRetries; i++) {
         try {
             await writeBytes(device, serviceUuid, charUuid, bytes, true);
-            return { ok: true, attempts: i + 1 };  // ← 返回尝试次数
+            return { ok: true, attempts: i + 1 };
         } catch (err) {
             const msg = err.message || '';
             if (msg.includes('not connected') || msg.includes('disconnected')) {
@@ -164,21 +145,13 @@ async function writeWithRetry(device, serviceUuid, charUuid, bytes, maxRetries =
     return { ok: false, attempts: maxRetries + 1 };
 }
 
-// ─── 构建一次BLE写入包（130字节）────────────────────────────────────────────
-function buildPacket(counter, dataSlice) {
+export function buildPacket(counter, dataSlice) {
     const packet = new Uint8Array(COUNTER_BYTES + CHUNK_SIZE);
     packet[0] = counter & 0xff;
     packet[1] = (counter >> 8) & 0xff;
     packet.set(dataSlice, COUNTER_BYTES);
     return packet;
 }
-
-// ─── TODO: 等老板修好固件后，在这里实现重发逻辑 ─────────────────────────────
-// 格式还未确认，老板会告知：
-// - CTRL ACK 里哪些 bytes 表示缺失包
-// - 是 bitmap 还是 counter 列表
-// - 重发时需不需要先发请求命令
-// async function retryMissingPackets(...) { }
 
 // ─── Main send function ───────────────────────────────────────────────────────
 export async function sendCombined(device, profileBytes, greetingBytes, onProgress, updateType = 'both') {
@@ -206,7 +179,6 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
     let dataSubscription = null;
 
     try {
-        // 先订阅 DATA notify
         dataSubscription = device.monitorCharacteristicForService(
             dataServiceUuid,
             CHAR_UUID_DATA,
@@ -218,24 +190,7 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
             }
         );
 
-        // ─── 根据 updateType 先发对应指令 ────────────────────────────
-        // if (updateType === 'profile') {
-        //     onProgress?.(null, null, null, null, `📤 Sending UPDATE PROFILE ONLY command...`);
-        //     await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_UPDATE_PROFILE_ONLY, false);
-        //     await sleep(50);
-        // } else if (updateType === 'greeting') {
-        //     onProgress?.(null, null, null, null, `📤 Sending UPDATE GREETING ONLY command...`);
-        //     await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_UPDATE_GREETING_ONLY, false);
-        //     await sleep(50);
-        // }
-        // // updateType === 'both' 时什么都不发，直接走 CMD_START
-
-        // // 然后再发 START（原来就有的）
-        // onProgress?.(null, null, null, null, `📤 Sending START...`);
-        // await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_START, false);
-        // await sleep(100);
         if (updateType === 'mode2') {
-            // Mode 2：先发 CMD_MODE2，再发 CMD_START
             onProgress?.(null, null, null, null, `📤 Sending MODE2 command...`);
             await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_MODE2, false);
             await sleep(200);
@@ -255,7 +210,6 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
             await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_START, false);
             await sleep(100);
         } else {
-            // 'both' - Mode 1 普通发送
             onProgress?.(null, null, null, null, `📤 Sending START...`);
             await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_START, false);
             await sleep(100);
@@ -266,30 +220,6 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
         let sent = 0;
         let lostCount = 0;
 
-        // const sendLogicPacket = async (baseCounter, logicData) => {
-        //     const firstHalf = logicData.slice(0, CHUNK_SIZE);
-        //     const secondHalf = logicData.slice(CHUNK_SIZE, LOGIC_PACKET_SIZE);
-        //     const debugLog = (msg) => onProgress?.(null, null, null, null, msg);
-
-        //     const t1 = Date.now();
-        //     const packet1 = buildPacket(baseCounter, firstHalf);
-        //     const ok1 = await writeWithRetry(device, dataServiceUuid, CHAR_UUID_DATA, packet1, MAX_WRITE_RETRIES, debugLog);
-        //     const t2 = Date.now();
-
-        //     if (!ok1) lostCount++;
-        //     sent++;
-        //     onProgress?.(sent, totalPackets, baseCounter, packet1,
-        //         ok1 ? `✅ CTR:${baseCounter} (${t2 - t1}ms)` : `❌ LOST CTR:${baseCounter}`);
-
-        //     const packet2 = buildPacket(baseCounter + 1, secondHalf);
-        //     const ok2 = await writeWithRetry(device, dataServiceUuid, CHAR_UUID_DATA, packet2, MAX_WRITE_RETRIES, debugLog);
-        //     const t3 = Date.now();
-
-        //     if (!ok2) lostCount++;
-        //     sent++;
-        //     onProgress?.(sent, totalPackets, baseCounter + 1, packet2,
-        //         ok2 ? `✅ CTR:${baseCounter + 1} (${t3 - t2}ms)` : `❌ LOST CTR:${baseCounter + 1}`);
-        // };
         const sendLogicPacket = async (baseCounter, logicData) => {
             const firstHalf = logicData.slice(0, CHUNK_SIZE);
             const secondHalf = logicData.slice(CHUNK_SIZE, LOGIC_PACKET_SIZE);
@@ -297,29 +227,37 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
 
             const t1 = Date.now();
             const packet1 = buildPacket(baseCounter, firstHalf);
-            const { ok: ok1, attempts: attempts1 } = await writeWithRetry(device, dataServiceUuid, CHAR_UUID_DATA, packet1, MAX_WRITE_RETRIES, debugLog);
+            const { ok: ok1, attempts: attempts1 } = await writeWithRetry(
+                device, dataServiceUuid, CHAR_UUID_DATA, packet1, MAX_WRITE_RETRIES, debugLog
+            );
             const t2 = Date.now();
             if (!ok1) lostCount++;
             sent++;
             onProgress?.(sent, totalPackets, baseCounter, packet1,
                 ok1
-                    ? (attempts1 > 1 ? `🔄 CTR:${baseCounter} OK after ${attempts1} retries (${t2 - t1}ms)` : `✅ CTR:${baseCounter} (${t2 - t1}ms)`)
+                    ? (attempts1 > 1
+                        ? `🔄 CTR:${baseCounter} OK after ${attempts1} retries (${t2 - t1}ms)`
+                        : `✅ CTR:${baseCounter} (${t2 - t1}ms)`)
                     : `❌ LOST CTR:${baseCounter} after ${attempts1} retries`
             );
 
             const packet2 = buildPacket(baseCounter + 1, secondHalf);
-            const { ok: ok2, attempts: attempts2 } = await writeWithRetry(device, dataServiceUuid, CHAR_UUID_DATA, packet2, MAX_WRITE_RETRIES, debugLog);
+            const { ok: ok2, attempts: attempts2 } = await writeWithRetry(
+                device, dataServiceUuid, CHAR_UUID_DATA, packet2, MAX_WRITE_RETRIES, debugLog
+            );
             const t3 = Date.now();
             if (!ok2) lostCount++;
             sent++;
             onProgress?.(sent, totalPackets, baseCounter + 1, packet2,
                 ok2
-                    ? (attempts2 > 1 ? `🔄 CTR:${baseCounter + 1} OK after ${attempts2} retries (${t3 - t2}ms)` : `✅ CTR:${baseCounter + 1} (${t3 - t2}ms)`)
+                    ? (attempts2 > 1
+                        ? `🔄 CTR:${baseCounter + 1} OK after ${attempts2} retries (${t3 - t2}ms)`
+                        : `✅ CTR:${baseCounter + 1} (${t3 - t2}ms)`)
                     : `❌ LOST CTR:${baseCounter + 1} after ${attempts2} retries`
             );
         };
 
-        // 2) Profile
+        // Profile packets
         if (profileBytes) {
             for (let j = 0; j < PROFILE_LOGIC_PACKETS; j++) {
                 const baseCounter = j * 2;
@@ -332,7 +270,7 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
             await sleep(20);
         }
 
-        // 3) Greeting
+        // Greeting packets
         if (greetingBytes) {
             for (let j = 0; j < GREETING_LOGIC_PACKETS; j++) {
                 const baseCounter = GREETING_START_COUNTER + j * 2;
@@ -345,7 +283,7 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
             await sleep(20);
         }
 
-        // 4) STOP
+        // STOP
         onProgress?.(null, null, null, null, `📤 Sending STOP...`);
         await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_STOP, false);
         await sleep(STOP_WAIT_MS);

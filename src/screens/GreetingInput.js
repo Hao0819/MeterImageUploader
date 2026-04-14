@@ -9,8 +9,6 @@ import { captureRef } from 'react-native-view-shot';
 import { GREETING_W, GREETING_H, GREETING_MONO_BYTES } from '../utils/ImageConverter';
 import GreetingRenderer from '../utils/GreetingRenderer';
 
-const MAX_CHARS = 60;
-
 export default function GreetingInput({ navigation, route }) {
     const { device, deviceName, phase, imageUri, updateType } = route.params;
 
@@ -100,8 +98,8 @@ export default function GreetingInput({ navigation, route }) {
         }
     };
 
-    const isEnglishOnly = /^[a-zA-Z0-9\s\p{P}\p{S}]*$/u.test(text);
-    const effectiveMax = isEnglishOnly ? 80 : 40;
+    const hasChinese = /[\u4E00-\u9FFF]/.test(text);
+    const effectiveMax = hasChinese ? 50 : 135;
     const remaining = effectiveMax - text.length;
     return (
         <SafeAreaView style={s.container}>
@@ -158,7 +156,7 @@ export default function GreetingInput({ navigation, route }) {
                             {error
                                 ? <Text style={s.errorText}>{error}</Text>
                                 : <Text style={s.hintText}>
-                                    {isEnglishOnly ? '✓ English · max 80 chars' : '⚠️ Non-English · max 40 chars'}
+                                    {hasChinese ? '⚠️ Chinese · max 50 chars' : '✓ max 135 chars'}
                                 </Text>
                             }
                             <Text style={[s.counter, remaining < 5 && s.counterWarn]}>{remaining}</Text>
