@@ -55,7 +55,7 @@ async function uriToRgb565(uri) {
     return rgbaToRgb565(decoded.data);
 }
 
-async function convertGreetingToBytesFromRef(viewRef) {
+async function convertGreetingToBytesFromRef(viewRef, debugId) {
     const uri = await captureRef(viewRef, {
         format: 'jpg',
         quality: 1.0,
@@ -63,6 +63,7 @@ async function convertGreetingToBytesFromRef(viewRef) {
         height: GREETING_H,
         result: 'tmpfile',
     });
+    console.log(`[${debugId}] captured uri: ${uri}`);
 
     const base64 = await RNFS.readFile(uri, 'base64');
     const binary = atob(base64);
@@ -117,12 +118,15 @@ export default function Mode2Flow({ navigation, route }) {
     const logScrollRef = useRef(null);
     const cancelRef = useRef(false);
 
-    const greetingRefs = {
-        s1: useRef(null),
-        s2: useRef(null),
-        s3: useRef(null),
-    };
+    const greetingRefS1 = useRef(null);
+    const greetingRefS2 = useRef(null);
+    const greetingRefS3 = useRef(null);
 
+    const greetingRefs = {
+        s1: greetingRefS1,
+        s2: greetingRefS2,
+        s3: greetingRefS3,
+    };
     const [pages, setPages] = useState({
         p1: { uri: null },
         p2: { uri: null },
@@ -223,7 +227,7 @@ export default function Mode2Flow({ navigation, route }) {
                 const ref = greetingRefs[gStep.id];
                 if (!ref?.current) throw new Error(`${gStep.id} offscreen view is null`);
                 addLog(`  Converting ${gStep.id}...`);
-                greetingBytesMap[gStep.id] = await convertGreetingToBytesFromRef(ref.current);
+                greetingBytesMap[gStep.id] = await convertGreetingToBytesFromRef(ref.current, gStep.id);
                 addLog(`  ${gStep.id} done: ${greetingBytesMap[gStep.id].length} bytes`);
             }
             addLog('✅ All greetings pre-converted');
@@ -334,7 +338,7 @@ export default function Mode2Flow({ navigation, route }) {
                 totalRetries,
             };
             addLog(`\n✅ All pages sent. Lost: ${totalLost}, Retries: ${totalRetries}`);
-            setSendStats(sendStatsRef.current); 
+            setSendStats(sendStatsRef.current);
             setPacketLogSnapshot([...packetLogsRef.current]);
             setDone(true);
 
@@ -342,7 +346,7 @@ export default function Mode2Flow({ navigation, route }) {
             addLog(`❌ Error: ${err.message}`);
             Alert.alert('Send Error', err.message);
             setPacketLogSnapshot([...packetLogsRef.current]);
-            setSendStats(sendStatsRef.current); 
+            setSendStats(sendStatsRef.current);
         } finally {
             setSending(false);
         }
@@ -498,7 +502,7 @@ export default function Mode2Flow({ navigation, route }) {
                     ) : (() => {
                         const hasArabic = /[\u0600-\u06FF]/.test(pages[step.id].text);
                         const hasChinese = /[\u4E00-\u9FFF]/.test(pages[step.id].text);
-                            const MAX_CHARS = hasChinese ? 50 : 135;
+                        const MAX_CHARS = hasArabic ? 130 : hasChinese ? 50 : 135;
                         const charCount = pages[step.id].text.length;
                         return (
                             <View>
@@ -662,9 +666,9 @@ export default function Mode2Flow({ navigation, route }) {
 
                 {/* Hidden offscreen GreetingRenderer views for captureRef */}
                 <View style={s.hiddenCanvas}>
-                    <GreetingRenderer text={pages.s1.text.trim() || ' '} viewRef={greetingRefs.s1} />
-                    <GreetingRenderer text={pages.s2.text.trim() || ' '} viewRef={greetingRefs.s2} />
-                    <GreetingRenderer text={pages.s3.text.trim() || ' '} viewRef={greetingRefs.s3} />
+                    <GreetingRenderer key="s1" text={pages.s1.text.trim() || ' '} viewRef={greetingRefS1} />
+                    <GreetingRenderer key="s2" text={pages.s2.text.trim() || ' '} viewRef={greetingRefS2} />
+                    <GreetingRenderer key="s3" text={pages.s3.text.trim() || ' '} viewRef={greetingRefS3} />
                 </View>
 
             </ScrollView>
@@ -676,8 +680,7 @@ export default function Mode2Flow({ navigation, route }) {
 const s = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8fafc' },
     scroll: { padding: 20, paddingBottom: 48 },
-    hiddenCanvas: { position: 'absolute', top: -9999, left: -9999, opacity: 0 },
-
+    hiddenCanvas: { position: 'absolute', top: -9999, left: -9999, opacity: 0, flexDirection: 'column' },
     header: { marginBottom: 16 },
     headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
     backText: { color: '#16a34a', fontSize: 17, fontWeight: '600' },
@@ -780,7 +783,7 @@ const s = StyleSheet.create({
     doneBtn: { backgroundColor: '#16a34a', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12 },
     doneBtnTxt: { color: '#fff', fontWeight: '700', fontSize: 14 },
     charCount: { fontSize: 11, color: '#94a3b8', textAlign: 'right', marginTop: 4, marginBottom: 2 },
-   
+
     deviceBar: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
         backgroundColor: '#fff', paddingHorizontal: 14, paddingVertical: 10,
