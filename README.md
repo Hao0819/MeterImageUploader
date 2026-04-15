@@ -1,132 +1,208 @@
-# ⚡ EBQ Meter BLE App
+# MeterImageUploader
 
-A React Native mobile app for sending profile images and greeting text to smart electricity meters via Bluetooth Low Energy (BLE).
+A React Native app for preparing and uploading profile images and greeting screens to a BLE-enabled meter LCD device.
 
----
+## Overview
 
-## 📱 Features
+MeterImageUploader lets a user connect to a BLE meter, choose an upload mode, prepare image and/or greeting content, preview the result, and send it to the device.
 
-- **BLE Connection** — Scan and connect to EBQ meters wirelessly
-- **Profile Image Transfer** — Send a 128×128 RGB565 profile image to the meter
-- **Greeting Screen** — Send custom greeting text rendered as a 1-bit monochrome bitmap (128×128 px) to the meter LCD
-- **Multi-language Support** — English, Chinese (中文), Arabic (العربية), Thai (ภาษาไทย), and more
-- **Live LCD Preview** — See exactly how your greeting will look on the meter screen before sending
-- **Two-colour Progress Bar** — Track profile and greeting transfer progress separately
-- **Packet Log Viewer** — Inspect every BLE packet sent during transfer
+The app currently supports:
 
----
+- Single-phase flow
+- Meter reset
+- Normal upload mode
+- Extended multi-page upload mode
+- Profile-only update
+- Greeting-only update
+- Profile + greeting update
+- Camera and gallery image input
+- Greeting text rendering to monochrome bitmap
+- BLE packet logs, reconnect, and cancel support
 
-## 🗂 Screen Flow
-
-```
-Device Scanner
-     ↓
-Image Picker / Cropper
-     ↓
-Greeting Input
-     ↓
-CropSend (Preview & Transfer)
-     ↓
-Log Viewer
-```
+> Note: 3-phase is shown in the UI as coming soon.
 
 ---
 
-## 📐 Data Specifications
+## Main Flows
 
-| Data | Format | Resolution | Size |
-|------|--------|------------|------|
-| Profile image | RGB565 | 128×128 px | 32,768 bytes |
-| Greeting bitmap | 1-bit monochrome | 128×128 px | 2,048 bytes |
+### 1. Phase selection
+The user first selects the meter phase type.
 
----
+- Single phase
+- 3-phase (coming soon)
 
-## ✍️ Greeting Text Limits
+### 2. Mode selection
+After phase selection, the user chooses one of these modes:
 
-| Language | Character Limit |
-|----------|----------------|
-| English / Numbers / Symbols only | **60 characters** |
-| Chinese, Arabic, Thai, or any non-English | **30 characters** |
+- **Mode 0 — Default Reset**
+  Reset the meter to default settings.
 
-The app automatically detects the language as you type and adjusts the limit in real time.
+- **Mode 1 — Normal Mode**
+  Upload profile image and/or greeting screen.
 
----
+- **Mode 2 — Extended Mode**
+  Upload multiple pages:
+  - P1 image page
+  - P2 image page
+  - S1 greeting page
+  - S2 greeting page
+  - S3 greeting page
 
-## 🔧 Tech Stack
+### 3. Update type selection
+For Normal Mode, the user can choose:
 
-- **React Native** (iOS & Android)
-- **react-native-ble-plx** — BLE communication
-- **react-native-view-shot** — Offscreen rendering for bitmap capture
-- **jpeg-js** — JPEG decoding for image conversion
-- **react-native-fs** — File system access
-- **buffer** — Binary data handling
+- **Update Greeting only**
+- **Update Profile only**
+- **Update Greeting & Profile**
 
----
+### 4. Content preparation
+Depending on the selected update type, the app will:
 
-## 📦 Installation
+- Open the camera
+- Allow gallery selection
+- Crop the image to the required LCD size
+- Let the user enter greeting text
+- Render greeting text into a 1-bit LCD bitmap
 
-```bash
-# Install dependencies
-npm install
-
-# iOS
-cd ios && pod install && cd ..
-npx react-native run-ios
-
-# Android
-npx react-native run-android
-```
-
----
-
-## 🔑 Permissions Required
-
-### Android
-```xml
-<uses-permission android:name="android.permission.BLUETOOTH" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-```
-
-### iOS
-Add to `Info.plist`:
-```xml
-<key>NSBluetoothAlwaysUsageDescription</key>
-<string>This app uses Bluetooth to communicate with EBQ meters.</string>
-```
+### 5. Preview and send
+Before transmission, the app shows a preview and then sends the data over BLE while displaying progress and logs.
 
 ---
 
-## 📁 Project Structure
+## Screen Structure
 
-```
+Current main screens in the app include:
+
+- `PhaseSelect.jsx`
+- `ModeSelect.js`
+- `UpdateTypeSelect.jsx`
+- `CameraScreen.jsx`
+- `GreetingInput.js`
+- `CropSend.jsx`
+- `Mode2Flow.js`
+
+Supporting utility files include:
+
+- `ble.js`
+- `ImageConverter.js`
+- `GreetingRenderer.js`
+- `mode2Constants.js`
+
+---
+
+## Image and Greeting Format
+
+### Profile image
+- Size: **128 × 128**
+- Format: **RGB565**
+- Total bytes: **32768**
+
+### Greeting screen
+- Size: **128 × 128**
+- Format: **1-bit monochrome**
+- Total bytes: **2048**
+
+Greeting text is rendered off-screen and converted into a bitmap before upload.
+
+Supported text types in the current UI:
+
+- English
+- Chinese
+- Arabic
+
+The renderer applies different font-size logic depending on language and character count.
+
+---
+
+## BLE Protocol Summary
+
+### Characteristics
+- **CTRL characteristic**: `519ebbd3-78e1-4e86-90c1-d40616058d88`
+- **DATA characteristic**: `8f3c2a71-6d94-4b8e-a1f7-3c5d9e24b6a8`
+
+### Commands
+The app uses dedicated command bytes for:
+
+- Start
+- Stop
+- Mode 2
+- Update profile only
+- Update greeting only
+- Reset to default
+
+### Packet format
+- Counter size: **2 bytes**
+- Physical data chunk: **128 bytes**
+- One logical packet: **256 bytes**
+- Each logical packet is split into **2 BLE writes**
+
+### Normal mode layout
+- Profile packets start from counter `0`
+- Greeting packets start from counter `896`
+
+### Extended mode layout
+Extended Mode uses these page groups:
+
+- `P1`
+- `P2`
+- `S1`
+- `S2`
+- `S3`
+
+---
+
+## Features
+
+- BLE scan and connect
+- Device reconnect handling
+- Disconnect handling
+- Camera capture
+- Gallery selection
+- Image cropping
+- Greeting text input
+- Greeting preview
+- Packet send progress
+- Retry handling during BLE writes
+- Transfer log viewer
+- Cancel during transfer
+- Send again / start over actions after completion
+
+---
+
+## Libraries Used
+
+Main libraries used in the shared code include:
+
+- `react-native-ble-plx`
+- `react-native-vision-camera`
+- `react-native-image-crop-picker`
+- `react-native-view-shot`
+- `react-native-fs`
+- `@react-native-camera-roll/camera-roll`
+- `jpeg-js`
+- `buffer`
+
+---
+
+## Project Structure
+
+```text
 src/
-├── screens/
-│   ├── GreetingInput.js     # Greeting text input with live LCD preview
-│   ├── CropSend.jsx         # Image preview and BLE transfer
-│   └── LogViewer.js         # BLE packet log inspector
-├── utils/
-│   ├── ble.js               # BLE connection and packet sending logic
-│   ├── ImageConverter.js    # RGB565 and mono1 image conversion
-│   └── GreetingRenderer.js  # Offscreen text renderer for bitmap capture
-```
+  screens/
+    PhaseSelect.jsx
+    ModeSelect.js
+    UpdateTypeSelect.jsx
+    SourceSelect.jsx
+    CameraScreen.jsx
+    GreetingInput.js
+    CropSend.jsx
+    Mode2Flow.js
 
----
+  utils/
+    ble.js
+    ImageConverter.js
+    GreetingRenderer.js
+    mode2Constants.js
 
-## 🚀 BLE Transfer Process
-
-1. **Profile image** is read from file, converted to RGB565 format, and split into packets (counters `0x0000`–`0x00FF`)
-2. **Greeting bitmap** is rendered offscreen, captured as JPEG, decoded to RGBA, then converted to 1-bit mono and packed (counters `0x0380`–`0x038F`)
-3. Both are sent via `sendCombined()` with progress callbacks
-4. The two-colour progress bar shows blue for profile packets and orange for greeting packets
-
----
-
-## 📋 Notes
-
-- Supports **Single phase** and **3-Phase** meter modes
-- The greeting preview in both `GreetingInput` and `CropSend` shows a fixed 128×128 px LCD simulation
-- Arabic text is automatically rendered right-to-left (RTL)
-- JPEG compression threshold is set to `brightness < 127` to avoid grey-edge artifacts in mono conversion
+  components/
+    PacketLogViewer.js
