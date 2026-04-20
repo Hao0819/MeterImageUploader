@@ -281,11 +281,11 @@ lcdScreen: {
     borderWidth: 1.5, 
     borderColor: '#cbd5e1',
     borderRadius: 8, 
-    width: 128,        // ✅ 固定宽度
-    height: 128,       // ✅ 固定高度
+    width: 128,        
+    height: 128,      
     alignItems: 'center', 
     justifyContent: 'center',
-    overflow: 'hidden', // ✅ 防止文字溢出
+    overflow: 'hidden', 
 },
     lcdText: {
         color: '#000000', fontSize: 13, textAlign: 'center',

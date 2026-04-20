@@ -89,42 +89,6 @@ export default function CropSend({ navigation, route }) {
         setTimeout(() => logScrollRef.current?.scrollToEnd({ animated: false }), 50);
     }, []);
 
-    // ── Convert on mount ──────────────────────────────────────────
-    // const convert = useCallback(async () => {
-    //     setStatus(STATUS.CONVERTING);
-    //     try {
-    //         // 1) Profile: read file → RGB565
-    //         addLog('Reading profile image…');
-    //         const b64 = await RNFS.readFile(imageUri, 'base64');
-    //         const buf = Buffer.from(b64, 'base64');
-    //         addLog(`File size: ${buf.length} bytes`);
-
-    //         const pBytes = await convertProfileBuffer(buf);
-    //         setProfileBytes(pBytes);
-    //         addLog(`✅ Profile converted: ${pBytes.length} bytes (${PROFILE_W}×${PROFILE_H} RGB565)`);
-
-    //         // 2) Greeting: already converted in GreetingInput
-    //         const gBytes = new Uint8Array(greetingBytesArray);
-    //         setGreetingBytes(gBytes);
-    //         addLog(`greetingBytesArray type: ${typeof greetingBytesArray}, length: ${greetingBytesArray?.length}`);
-    //         addLog(`gBytes first 4: ${gBytes[0]} ${gBytes[1]} ${gBytes[2]} ${gBytes[3]}`);
-    //         addLog(`✅ Greeting ready: ${gBytes.length} bytes (${GREETING_W}×${GREETING_H} mono1)`);
-    //         addLog(`gBytes first 8: ${Array.from(gBytes.slice(0, 8)).join(',')}`);
-    //         addLog(`gBytes last 8: ${Array.from(gBytes.slice(-8)).join(',')}`);
-    //         const nonZero = gBytes.filter(b => b !== 0).length;
-    //         addLog(`Non-zero bytes: ${nonZero} / ${gBytes.length}`);
-    //         // 3) Hex preview of the combined 24KB buffer layout
-    //         addLog(`📐 Layout: Profile counter 000–255 | Greeting counter 896–911`);
-
-    //         setStatus(STATUS.IDLE);
-    //     } catch (err) {
-    //         addLog('ERROR: ' + err.message);
-    //         setStatus(STATUS.ERROR);
-    //     } finally {
-    //         flushLog();
-    //     }
-    // }, [imageUri, greetingBytesArray, addLog, flushLog]);
-
     const convert = useCallback(async () => {
         setStatus(STATUS.CONVERTING);
         try {
@@ -183,56 +147,6 @@ export default function CropSend({ navigation, route }) {
         });
         return () => sub.remove();
     }, [device.id]);
-    // const send = useCallback(async () => {
-    //     if (!profileBytes || !greetingBytes) return;
-
-    //     logBufferRef.current = [];
-    //     setLog([]);
-    //     setStatus(STATUS.SENDING);
-    //     setProgress({ sent: 0, total: 0 });
-    //     addLog('Sending START command…');
-    //     flushLog();
-
-    //     try {
-    //         const packetLogs = [];
-    //         flushLog();
-
-    //         const finalProfileBytes = updateType === 'greeting' ? new Uint8Array(PROFILE_BYTES_TOTAL) : profileBytes;
-    //         const finalGreetingBytes = updateType === 'profile' ? new Uint8Array(GREETING_BYTES_TOTAL) : greetingBytes;
-
-    //         await sendCombined(device, finalProfileBytes, finalGreetingBytes, (sent, total, counter, packet, errorMsg) => {
-    //             setProgress({ sent, total });
-
-    //             const section = counter >= GREETING_START_COUNTER ? '👋' : '🖼️ ';
-
-    //             if (errorMsg) {
-    //                 addLog(errorMsg);
-    //                 flushLog();
-    //             }
-
-    //             const hex = Array.from(packet.slice(0, 16))
-    //                 .map(b => b.toString(16).padStart(2, '0').toUpperCase())
-    //                 .join(' ');
-    //             packetLogs.push(`${section} CTR:${counter.toString(16).toUpperCase().padStart(4, '0')} | ${hex}`);
-    //             packetLogsRef.current = packetLogs;
-    //             if (sent === 1) setHasLogs(true);
-    //             if (sent % 20 === 0 || sent === total) {
-    //                 addLog(`${section} ${sent}/${total} packets sent...`);
-    //                 flushLog();
-    //             }
-    //         });
-
-    //         addLog('✅ Transfer complete!');
-    //         setStatus(STATUS.DONE);
-    //         packetLogsRef.current = packetLogs;
-
-    //     } catch (err) {
-    //         addLog('Send error: ' + err.message);
-    //         setStatus(STATUS.ERROR);
-    //     } finally {
-    //         flushLog();
-    //     }
-    // }, [device, profileBytes, greetingBytes, updateType, addLog, flushLog]);
 
     const send = useCallback(async () => {
         cancelRef.current = false;
