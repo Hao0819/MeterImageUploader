@@ -23,11 +23,12 @@ import BleScanner from './src/screens/BleScanner';
 import PhaseSelect from './src/screens/PhaseSelect';
 import ModeSelect from './src/screens/ModeSelect';
 import CameraScreen from './src/screens/CameraScreen';
-import GreetingInput from './src/screens/GreetingInput';
-import CropSend from './src/screens/CropSend';
+// import GreetingInput from './src/screens/GreetingInput';
+// import CropSend from './src/screens/CropSend';
 import LogViewer from './src/screens/LogViewer';
-import UpdateTypeSelect from './src/screens/UpdateTypeSelect';
+// import UpdateTypeSelect from './src/screens/UpdateTypeSelect';
 import Mode2Flow from './src/screens/Mode2Flow';
+import Mode1Flow from './src/screens/Mode1Flow';
 
 const Stack = createNativeStackNavigator();
 
@@ -38,7 +39,7 @@ export default function App() {
         screenOptions={{
           headerShown: false,
           animation: 'slide_from_right',
-          contentStyle: { backgroundColor: '#0d0d0d' },
+          contentStyle: { backgroundColor: '#f8fafc' },
         }}
       >
         {/* Step 1 — Scan & connect */}
@@ -50,17 +51,10 @@ export default function App() {
         {/* Step 3 — Select mode (0=Reset, 1=Normal, 2=Extended) */}
         <Stack.Screen name="ModeSelect" component={ModeSelect} />
 
-        {/* Mode 1: Select update type (profile / greeting / both) */}
-        <Stack.Screen name="UpdateTypeSelect" component={UpdateTypeSelect} />
-
         {/* Mode 1: Take photo or pick from gallery */}
         <Stack.Screen name="Camera" component={CameraScreen} />
 
-        {/* Mode 1: Type greeting text */}
-        <Stack.Screen name="GreetingInput" component={GreetingInput} />
-
-        {/* Mode 1: Crop preview + send Profile+Greeting together */}
-        <Stack.Screen name="CropSend" component={CropSend} />
+        <Stack.Screen name="Mode1Flow" component={Mode1Flow} />
 
         {/* Mode 2: Multi-page upload (P1 → P2 → S1 → S2 → S3) */}
         <Stack.Screen name="Mode2Flow" component={Mode2Flow} />

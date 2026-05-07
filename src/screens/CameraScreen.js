@@ -8,7 +8,7 @@ import {
 import { Camera, useCameraDevice, useCameraPermission } from 'react-native-vision-camera';
 import ImageCropPicker from 'react-native-image-crop-picker';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
-
+import ImageResizer from 'react-native-image-resizer';
 const PROFILE_W = 128;
 const PROFILE_H = 128;
 
@@ -108,14 +108,25 @@ export default function CameraScreen({ navigation, route }) {
 
     // REPLACE afterCrop with this:
     const afterCrop = (uri) => {
-        // ─── 加这3行 ──────────────────────────────────────────
+        // 一优先：有回调就用回调（Mode1Flow / Mode2Flow）
         if (route.params?.onImageCaptured) {
             route.params.onImageCaptured(uri);
             navigation.goBack();
             return;
         }
-        // ─────────────────────────────────────────────────────
 
+        // 二：有指定returnScreen
+        if (route.params?.returnScreen) {
+            navigation.navigate(route.params.returnScreen, {
+                capturedImageUri: uri,
+                device: bleDevice,
+                deviceName,
+                phase,
+            });
+            return;
+        }
+
+        // 三：旧版 profile-only 流程
         if (updateType === 'profile') {
             const { GREETING_MONO_BYTES } = require('../utils/ImageConverter');
             navigation.navigate('CropSend', {
@@ -127,15 +138,9 @@ export default function CameraScreen({ navigation, route }) {
                 greetingBytes: Array(GREETING_MONO_BYTES).fill(0),
                 updateType,
             });
-        } else {
-            navigation.navigate('GreetingInput', {
-                device: bleDevice,
-                deviceName,
-                phase,
-                imageUri: uri,
-                updateType,
-            });
+            return;
         }
+
     };
 
     const shoot = async () => {
@@ -150,8 +155,7 @@ export default function CameraScreen({ navigation, route }) {
                 await CameraRoll.save(uri, { type: 'photo', album: 'MeterApp' });
             }
 
-            const cropped = await ImageCropPicker.openCropper({
-                path: uri,
+            const cropOptions = {
                 width: PROFILE_W,
                 height: PROFILE_H,
                 cropperToolbarTitle: `Crop to ${PROFILE_W}×${PROFILE_H}`,
@@ -160,7 +164,38 @@ export default function CameraScreen({ navigation, route }) {
                 cropperStatusBarColor: '#f8fafc',
                 cropperToolbarWidgetColor: '#0f172a',
                 compressImageQuality: 1,
+                lockAspectRatio: true,
+                forceJpg: true,
+            };
+
+            let finalUri = uri;
+
+            if (Platform.OS === 'ios') {
+                const orientationMap = {
+                    'portrait': 0,
+                    'portrait-upside-down': 180,
+                    'landscape-left': 0,
+                    'landscape-right': 0,
+                };
+                const rotation = orientationMap[photo.orientation] ?? 0;
+                const isLandscape = photo.orientation === 'landscape-left' || photo.orientation === 'landscape-right';
+
+                const resized = await ImageResizer.createResizedImage(
+                    uri,
+                    isLandscape ? photo.height : photo.width,
+                    isLandscape ? photo.width : photo.height,
+                    'JPEG',
+                    100,
+                    rotation,
+                );
+                finalUri = resized.uri;
+            }
+
+            const cropped = await ImageCropPicker.openCropper({
+                ...cropOptions,
+                path: finalUri,
             });
+
             afterCrop(cropped.path);
         } catch (e) {
             if (e.code !== 'E_PICKER_CANCELLED') Alert.alert('Error', e.message);

@@ -4,33 +4,30 @@ import {
     View, Text, TouchableOpacity, FlatList,
     StyleSheet, SafeAreaView, ActivityIndicator, Alert, Platform
 } from 'react-native';
-import { startScan, connectDevice, requestBlePermissions } from '../utils/ble';
+import { startScan, connectDevice, requestBlePermissions, getManager, cancelExistingConnection, sleep } from '../utils/ble';
 import { BleManager } from 'react-native-ble-plx';
 
-const bleManager = new BleManager();
-const TARGET_NAME = 'EBQ Meter';
-const CONNECT_TIMEOUT_MS = 10000; // 10 seconds
-const SCAN_DURATION_MS = 12000;   // 12 seconds
+
+const CONNECT_TIMEOUT_MS = 10000;
+const SCAN_DURATION_MS = 30000;
 
 export default function BleScanner({ navigation }) {
     const [devices, setDevices] = useState([]);
     const [scanning, setScanning] = useState(false);
     const [connecting, setConnecting] = useState(null);
-    const [bleReady, setBleReady] = useState(false); 
+    const [bleReady, setBleReady] = useState(false);
     const stopScanRef = useRef(null);
     const scanTimerRef = useRef(null);
 
-    // #1 — Monitor Bluetooth on/off status
     useEffect(() => {
-        const subscription = bleManager.onStateChange((state) => {
+        const subscription = getManager().onStateChange((state) => {
             if (state === 'PoweredOn') {
                 setBleReady(true);
             } else {
                 setBleReady(false);
-                // If Bluetooth is turned off, stop the ongoing scan.
                 stopScanning();
             }
-        }, true); // true = get the current state immediately
+        }, true);
 
         return () => {
             subscription.remove();
@@ -50,16 +47,10 @@ export default function BleScanner({ navigation }) {
     }, []);
 
     const scan = useCallback(async () => {
-        // #1 — Check if Bluetooth is enabled before scanning.
         if (!bleReady) {
-            Alert.alert(
-                'Bluetooth is Off',
-                'Please turn on Bluetooth to scan for devices.',
-                [{ text: 'OK' }]
-            );
+            Alert.alert('Bluetooth is Off', 'Please turn on Bluetooth to scan for devices.', [{ text: 'OK' }]);
             return;
         }
-
         const ok = await requestBlePermissions();
         if (!ok) {
             Alert.alert('Permission Denied', 'Bluetooth permissions are required.');
@@ -68,27 +59,26 @@ export default function BleScanner({ navigation }) {
 
         stopScanRef.current?.();
         if (scanTimerRef.current) clearTimeout(scanTimerRef.current);
-
         setDevices([]);
         setScanning(true);
 
         const stop = startScan(
             device => {
-                const name = device.name || device.localName || '';
-                if (!name.includes(TARGET_NAME)) return;
-
+                // ✅ Filtering already done in ble.js, just add to list
                 setDevices(prev =>
                     prev.find(d => d.id === device.id) ? prev : [...prev, device]
                 );
             },
-            err => { Alert.alert('Scan Error', err); stopScanning(); },
+            err => {
+                Alert.alert('Scan Error', err);
+                stopScanning();
+            },
         );
 
         stopScanRef.current = stop;
         scanTimerRef.current = setTimeout(() => stopScanning(), SCAN_DURATION_MS);
     }, [bleReady, stopScanning]);
 
-    // #2 — Connection timeout handling
     const connectWithTimeout = useCallback((deviceId) => {
         return Promise.race([
             connectDevice(deviceId),
@@ -105,22 +95,23 @@ export default function BleScanner({ navigation }) {
         stopScanning();
         setConnecting(device.id);
         try {
-            //#2 — Replace the original connectDevice with connectWithTimeout
-            const connected = await connectWithTimeout(device.id);
+            // ✅ 只取消旧连接，不销毁 manager
+            await cancelExistingConnection(device.id);
+            await sleep(500);
+
+            console.log(`[Scanner] Connecting to ${device.id}...`);
+            const connectedDevice = await connectWithTimeout(device.id);
+            console.log(`[Scanner] Connected ✅ device=${connectedDevice.id}`);
             navigation.navigate('PhaseSelect', {
-                device: connected,
-                deviceName: device.name || device.localName || device.id,
+                device: connectedDevice,
+                deviceName: device.localName || device.name || device.id,
             });
         } catch (err) {
-            //#2 — Retry option provided if connection fails
-            Alert.alert(
-                'Connection Failed',
-                err.message,
-                [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Retry', onPress: () => connect(device) },
-                ]
-            );
+            console.error(`[Scanner] Connection failed: ${err.message}`);
+            Alert.alert('Connection Failed', err.message, [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Retry', onPress: () => connect(device) },
+            ]);
         } finally {
             setConnecting(null);
         }
@@ -128,6 +119,8 @@ export default function BleScanner({ navigation }) {
 
     const renderDevice = ({ item }) => {
         const isConnecting = connecting === item.id;
+        // ✅ localName first — shows correct name on iOS
+        const displayName = item.localName || item.name || 'Unnamed Device';
         return (
             <TouchableOpacity
                 style={styles.deviceCard}
@@ -138,7 +131,7 @@ export default function BleScanner({ navigation }) {
                 <View style={styles.deviceLeft}>
                     <View style={styles.dot} />
                     <View style={{ flex: 1 }}>
-                        <Text style={styles.deviceName}>{item.name || item.localName || 'Unnamed Device'}</Text>
+                        <Text style={styles.deviceName}>{displayName}</Text>
                         <Text style={styles.deviceId}>{item.id}</Text>
                         {item.rssi !== undefined && (
                             <Text style={styles.deviceRssi}>RSSI {item.rssi} dBm</Text>
@@ -160,7 +153,6 @@ export default function BleScanner({ navigation }) {
                 <Text style={styles.subtitle}>Select your device</Text>
             </View>
 
-            {/* #1 — Show warning banner when Bluetooth is off */}
             {!bleReady && (
                 <View style={styles.bleBanner}>
                     <Text style={styles.bleBannerText}>⚠️ Bluetooth is off — please enable it to scan</Text>
@@ -205,17 +197,14 @@ export default function BleScanner({ navigation }) {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8fafc' },
-    header: { paddingHorizontal: 24, paddingTop: 28, paddingBottom: 20 },
+    header: { paddingHorizontal: 24, paddingTop: 36, paddingBottom: 20 },
     title: { fontSize: 32, fontWeight: '700', color: '#0f172a', letterSpacing: -0.5 },
     subtitle: { fontSize: 15, color: '#16a34a', marginTop: 4 },
-
-    // #1 — Warning banner when Bluetooth is off
     bleBanner: {
         marginHorizontal: 20, marginBottom: 12, paddingVertical: 10, paddingHorizontal: 16,
         backgroundColor: '#fef3c7', borderRadius: 10, borderWidth: 1, borderColor: '#fcd34d',
     },
     bleBannerText: { fontSize: 13, color: '#92400e', textAlign: 'center', fontWeight: '500' },
-
     scanBtn: {
         flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
         marginHorizontal: 20, marginBottom: 16, paddingVertical: 14,
@@ -223,7 +212,7 @@ const styles = StyleSheet.create({
         shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, shadowOffset: { width: 0, height: 3 }, elevation: 2,
     },
     scanBtnActive: { backgroundColor: '#16a34a', borderColor: '#16a34a' },
-    scanBtnDisabled: { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0', opacity: 0.6 }, // ✅ #1 禁用样式
+    scanBtnDisabled: { backgroundColor: '#f1f5f9', borderColor: '#e2e8f0', opacity: 0.6 },
     scanBtnText: { fontSize: 15, fontWeight: '600', color: '#0f172a' },
     scanBtnTextActive: { color: '#ffffff' },
     list: { paddingHorizontal: 20, paddingBottom: 20, flexGrow: 1 },

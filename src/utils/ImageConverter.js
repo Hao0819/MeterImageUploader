@@ -92,12 +92,37 @@ export async function convertImageBuffer(fileBuffer, imageType = IMAGE_TYPE.PROF
     const jpeg = require('jpeg-js');
     const { w, h } = getDimensions(imageType);
     const decoded = jpeg.decode(fileBuffer, { useTArray: true, formatAsRGBA: true });
-    if (decoded.width !== w || decoded.height !== h) {
-        throw new Error(
-            `Image must be ${w}×${h} after cropping. Got ${decoded.width}×${decoded.height}.`
-        );
+
+    const srcW = decoded.width;
+    const srcH = decoded.height;
+    let rgba = decoded.data;
+
+    if (srcW !== w || srcH !== h) {
+        // 误差超过2像素才报错
+        if (Math.abs(srcW - w) > 2 || Math.abs(srcH - h) > 2) {
+            throw new Error(`Image must be ${w}×${h} after cropping. Got ${srcW}×${srcH}.`);
+        }
+        // ±1~2像素误差：最近邻缩放修正
+        console.warn(`[ImageConverter] 修正尺寸 ${srcW}×${srcH} → ${w}×${h}`);
+        const dst = new Uint8Array(w * h * 4);
+        const xR = srcW / w;
+        const yR = srcH / h;
+        for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+                const sx = Math.min(Math.floor(x * xR), srcW - 1);
+                const sy = Math.min(Math.floor(y * yR), srcH - 1);
+                const si = (sy * srcW + sx) * 4;
+                const di = (y * w + x) * 4;
+                dst[di] = rgba[si];
+                dst[di + 1] = rgba[si + 1];
+                dst[di + 2] = rgba[si + 2];
+                dst[di + 3] = rgba[si + 3];
+            }
+        }
+        rgba = dst;
     }
-    return rgbaToRgb565(decoded.data);
+
+    return rgbaToRgb565(rgba);
 }
 
 

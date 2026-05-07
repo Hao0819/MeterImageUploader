@@ -1,57 +1,100 @@
 // src/screens/PhaseSelect.jsx
+// 改成
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, Alert } from 'react-native';
+import {
+    View,
+    Text,
+    TouchableOpacity,
+    StyleSheet,
+    SafeAreaView,
+    Alert,
+} from 'react-native';
+import { COLORS, UI } from '../theme/ui';
 
 export default function PhaseSelect({ navigation, route }) {
     const { device, deviceName } = route.params;
+    const deviceId = device?.id || 'Unknown ID';
+    const isConnected = true;
 
-    // Navigate to ModeSelect, passing phase forward
+
     const go = (phase) => navigation.navigate('ModeSelect', { device, deviceName, phase });
 
     return (
         <SafeAreaView style={s.container}>
             <View style={s.header}>
-                <TouchableOpacity onPress={() => navigation.navigate('BleScanner')} style={s.back}>
+                <TouchableOpacity
+                    onPress={() => navigation.navigate('BleScanner')}
+                    style={s.back}
+                >
                     <Text style={s.backText}>‹ Back</Text>
                 </TouchableOpacity>
-                <View style={s.connBadge}>
-                    <View style={s.connDot} />
-                    <Text style={s.connText}>{deviceName}</Text>
+
+                <View style={s.deviceBar}>
+                    <View style={s.deviceLeft}>
+                        <View
+                            style={[
+                                s.connDot,
+                                { backgroundColor: isConnected ? '#22c55e' : '#ef4444' },
+                            ]}
+                        />
+                        <View style={{ flex: 1, flexShrink: 1 }}>
+                            <Text style={s.connText} numberOfLines={1}>
+                                {deviceName}
+                            </Text>
+                            <Text style={s.connId} numberOfLines={1}>
+                                {deviceId}
+                            </Text>
+                        </View>
+                    </View>
+
+                    <Text
+                        style={[
+                            s.connStatus,
+                            { color: isConnected ? COLORS.success : COLORS.danger },
+                        ]}
+                    >
+                        {isConnected ? 'Connected' : 'Disconnected'}
+                    </Text>
                 </View>
+
                 <Text style={s.title}>Select phase</Text>
-                <Text style={s.subtitle}>Choose the meter type to upload profile &amp; greeting</Text>
+                <Text style={s.subtitle}>
+                    Choose the meter type to upload profile & greeting
+                </Text>
             </View>
 
             <View style={s.cards}>
-                {/* Single phase — active */}
                 <TouchableOpacity
                     style={[s.card, s.cardActive]}
                     onPress={() => go('single')}
                     activeOpacity={0.8}
                 >
-                    <View style={[s.icon, s.iconGreen]}>
-                        <Text style={s.iconNum}>1Φ</Text>
+                    <View style={[s.iconWrap, s.iconWrapActive]}>
+                        <Text style={[s.iconText, s.iconTextActive]}>1Φ</Text>
                     </View>
-                    <View style={s.cardText}>
+
+                    <View style={s.cardBody}>
                         <Text style={s.cardTitle}>Single phase</Text>
                         <Text style={s.cardDesc}>Standard single-phase meter LCD</Text>
                     </View>
+
                     <Text style={s.arrow}>›</Text>
                 </TouchableOpacity>
 
-                {/* 3-Phase — coming soon */}
                 <TouchableOpacity
-                    style={[s.card, s.cardDim]}
+                    style={[s.card, s.cardDisabled]}
                     onPress={() => Alert.alert('Coming soon', '3-Phase support is not available yet.')}
-                    activeOpacity={0.7}
+                    activeOpacity={0.75}
                 >
-                    <View style={[s.icon, s.iconGray]}>
-                        <Text style={[s.iconNum, s.iconNumMuted]}>3Φ</Text>
+                    <View style={s.iconWrap}>
+                        <Text style={s.iconTextMuted}>3Φ</Text>
                     </View>
-                    <View style={s.cardText}>
+
+                    <View style={s.cardBody}>
                         <Text style={s.cardTitleMuted}>3-Phase</Text>
                         <Text style={s.cardDesc}>Coming soon</Text>
                     </View>
+
                     <View style={s.badge}>
                         <Text style={s.badgeText}>Soon</Text>
                     </View>
@@ -62,38 +105,162 @@ export default function PhaseSelect({ navigation, route }) {
 }
 
 const s = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8fafc' },
-    header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 28 },
-    back: { marginBottom: 12 },
-    backText: { color: '#16a34a', fontSize: 17, fontWeight: '600' },
-    connBadge: {
-        flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16,
-        backgroundColor: '#f0fdf4', paddingHorizontal: 12, paddingVertical: 7,
-        borderRadius: 20, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#bbf7d0',
+    container: UI.screen,
+
+    header: {
+        paddingHorizontal: 20,
+        paddingTop: 28,
+        paddingBottom: 20,
     },
-    connDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22c55e' },
-    connText: { fontSize: 12, color: '#15803d', fontWeight: '600' },
-    title: { fontSize: 28, fontWeight: '700', color: '#0f172a', letterSpacing: -0.3, marginBottom: 4 },
-    subtitle: { fontSize: 13, color: '#64748b' },
-    cards: { paddingHorizontal: 20, gap: 14 },
+    back: {
+        marginBottom: 12,
+    },
+    backText: {
+        color: COLORS.primary,
+        fontSize: 17,
+        fontWeight: '600',
+    },
+
+    deviceBar: UI.deviceBar,
+    deviceLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: 12,
+    },
+    connDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginRight: 8,
+    },
+    connText: {
+        fontSize: 13,
+        color: COLORS.text,
+        fontWeight: '600',
+    },
+    connId: {
+        fontSize: 10,
+        color: COLORS.muted,
+        marginTop: 1,
+    },
+    connStatus: {
+        fontSize: 12,
+        fontWeight: '600',
+        marginLeft: 8,
+    },
+
+    title: {
+        fontSize: 26,
+        fontWeight: '700',
+        color: COLORS.text,
+        marginBottom: 2,
+    },
+    subtitle: {
+        fontSize: 13,
+        color: COLORS.subtext,
+    },
+
+    cards: {
+        paddingHorizontal: 20,
+        gap: 14,
+    },
+
     card: {
-        flexDirection: 'row', alignItems: 'center',
-        backgroundColor: '#ffffff', borderRadius: 18, padding: 18,
-        borderWidth: 1, borderColor: '#e2e8f0',
-        shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: COLORS.card,
+        borderRadius: 16,
+        padding: 16,
+        borderWidth: 1,
+        borderColor: COLORS.border,
     },
-    cardActive: { backgroundColor: '#f0fdf4', borderColor: '#86efac' },
-    cardDim: { opacity: 0.78 },
-    icon: { width: 52, height: 52, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
-    iconGreen: { backgroundColor: '#dcfce7' },
-    iconGray: { backgroundColor: '#f1f5f9' },
-    iconNum: { fontSize: 18, fontWeight: '700', color: '#16a34a' },
-    iconNumMuted: { color: '#64748b' },
-    cardText: { flex: 1 },
-    cardTitle: { fontSize: 17, fontWeight: '700', color: '#0f172a', marginBottom: 3 },
-    cardTitleMuted: { fontSize: 17, fontWeight: '700', color: '#64748b', marginBottom: 3 },
-    cardDesc: { fontSize: 13, color: '#64748b' },
-    arrow: { fontSize: 22, color: '#2563eb', fontWeight: '700' },
-    badge: { backgroundColor: '#fff7ed', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 4, borderWidth: 1, borderColor: '#fed7aa' },
-    badgeText: { fontSize: 11, color: '#c2410c', fontWeight: '700' },
+
+    cardActive: {
+        borderColor: COLORS.primaryBorder,
+        backgroundColor: COLORS.primarySoft,
+    },
+
+    cardDisabled: {
+        opacity: 0.82,
+    },
+
+    iconWrap: {
+        width: 52,
+        height: 52,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 14,
+        backgroundColor: COLORS.grayBtn,
+        borderWidth: 1,
+        borderColor: COLORS.grayBtnBorder,
+    },
+
+    iconWrapActive: {
+        backgroundColor: '#dbeafe',
+        borderColor: '#bfdbfe',
+    },
+
+    iconText: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: COLORS.text,
+    },
+
+    iconTextActive: {
+        color: COLORS.primary,
+    },
+
+    iconTextMuted: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: COLORS.subtext,
+    },
+
+    cardBody: {
+        flex: 1,
+    },
+
+    cardTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: COLORS.text,
+        marginBottom: 3,
+    },
+
+    cardTitleMuted: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: COLORS.subtext,
+        marginBottom: 3,
+    },
+
+    cardDesc: {
+        fontSize: 13,
+        color: COLORS.subtext,
+    },
+
+    arrow: {
+        fontSize: 22,
+        color: COLORS.primary,
+        fontWeight: '700',
+        marginLeft: 8,
+    },
+
+    badge: {
+        backgroundColor: '#fff7ed',
+        borderRadius: 999,
+        paddingHorizontal: 9,
+        paddingVertical: 4,
+        borderWidth: 1,
+        borderColor: '#fed7aa',
+        marginLeft: 8,
+    },
+
+    badgeText: {
+        fontSize: 11,
+        color: '#c2410c',
+        fontWeight: '700',
+    },
 });

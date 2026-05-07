@@ -1,8 +1,16 @@
 // src/screens/SourceSelect.jsx
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, Alert } from 'react-native';
+import {
+    View,
+    Text,
+    TouchableOpacity,
+    StyleSheet,
+    SafeAreaView,
+    Alert,
+} from 'react-native';
 import ImageCropPicker from 'react-native-image-crop-picker';
 import { getDimensions, IMAGE_TYPE } from '../utils/ImageConverter';
+import { COLORS, UI } from '../theme/ui';
 
 export default function SourceSelect({ navigation, route }) {
     const { device, deviceName, phase, imageType } = route.params;
@@ -20,18 +28,24 @@ export default function SourceSelect({ navigation, route }) {
                 height: h,
                 cropping: true,
                 cropperToolbarTitle: `Crop to ${w}×${h}`,
-                cropperActiveWidgetColor: '#16a34a',
+                cropperActiveWidgetColor: COLORS.primary,
                 cropperToolbarColor: '#ffffff',
-                cropperStatusBarColor: '#f8fafc',
-                cropperToolbarWidgetColor: '#0f172a',
+                cropperStatusBarColor: COLORS.bg,
+                cropperToolbarWidgetColor: COLORS.text,
                 compressImageQuality: 1,
             });
+
             navigation.navigate('CropSend', {
-                device, deviceName, phase, imageType,
+                device,
+                deviceName,
+                phase,
+                imageType,
                 imageUri: img.path,
             });
         } catch (e) {
-            if (e.code !== 'E_PICKER_CANCELLED') Alert.alert('Error', e.message);
+            if (e.code !== 'E_PICKER_CANCELLED') {
+                Alert.alert('Error', e.message);
+            }
         }
     };
 
@@ -45,11 +59,17 @@ export default function SourceSelect({ navigation, route }) {
                     <Text style={s.backText}>‹ Back</Text>
                 </TouchableOpacity>
 
-                <View style={s.connBadge}>
-                    <View style={s.connDot} />
-                    <Text style={s.connText}>
-                        {deviceName} · {phase === 'single' ? 'Single phase' : '3-Phase'}
-                    </Text>
+                <View style={s.deviceBar}>
+                    <View style={s.deviceLeft}>
+                        <View style={s.connDot} />
+                        <View style={{ flexShrink: 1 }}>
+                            <Text style={s.connText} numberOfLines={1}>{deviceName}</Text>
+                            <Text style={s.connId}>
+                                {phase === 'single' ? 'Single phase' : '3-Phase'}
+                            </Text>
+                        </View>
+                    </View>
+                    <Text style={s.connStatus}>Connected</Text>
                 </View>
 
                 <Text style={s.title}>Choose source</Text>
@@ -57,20 +77,32 @@ export default function SourceSelect({ navigation, route }) {
             </View>
 
             <View style={s.cards}>
-                <TouchableOpacity style={[s.bigCard, s.cardBlue]} onPress={openCamera} activeOpacity={0.8}>
-                    <View style={[s.bigIcon, s.iconBlue]}>
-                        <Text style={[s.bigIconText, s.iconBlueText]}>CAM</Text>
+                <TouchableOpacity
+                    style={s.bigCard}
+                    onPress={openCamera}
+                    activeOpacity={0.8}
+                >
+                    <View style={s.bigIcon}>
+                        <Text style={s.bigIconText}>CAM</Text>
                     </View>
                     <Text style={s.bigTitle}>Camera</Text>
-                    <Text style={s.bigDesc}>Take a photo, then crop to {w}×{h} px</Text>
+                    <Text style={s.bigDesc}>
+                        Take a photo, then crop to {w}×{h} px
+                    </Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={[s.bigCard, s.cardGreen]} onPress={openGallery} activeOpacity={0.8}>
-                    <View style={[s.bigIcon, s.iconGreen]}>
-                        <Text style={[s.bigIconText, s.iconGreenText]}>GAL</Text>
+                <TouchableOpacity
+                    style={s.bigCard}
+                    onPress={openGallery}
+                    activeOpacity={0.8}
+                >
+                    <View style={s.bigIcon}>
+                        <Text style={s.bigIconText}>GAL</Text>
                     </View>
                     <Text style={s.bigTitle}>Gallery</Text>
-                    <Text style={s.bigDesc}>Pick an existing photo and crop to {w}×{h} px</Text>
+                    <Text style={s.bigDesc}>
+                        Pick an existing photo and crop to {w}×{h} px
+                    </Text>
                 </TouchableOpacity>
             </View>
 
@@ -82,40 +114,109 @@ export default function SourceSelect({ navigation, route }) {
 }
 
 const s = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8fafc' },
-    header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 24 },
-    back: { marginBottom: 12 },
-    backText: { color: '#16a34a', fontSize: 17, fontWeight: '600' },
-    connBadge: {
-        flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12,
-        backgroundColor: '#f0fdf4', paddingHorizontal: 12, paddingVertical: 6,
-        borderRadius: 20, alignSelf: 'flex-start',
-        borderWidth: 1, borderColor: '#bbf7d0',
+    container: UI.screen,
+
+    header: {
+        paddingHorizontal: 20,
+        paddingTop: 20,
+        paddingBottom: 20,
     },
-    connDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#22c55e' },
-    connText: { fontSize: 11, color: '#15803d', fontWeight: '600' },
-    title: { fontSize: 26, fontWeight: '700', color: '#0f172a', marginBottom: 2 },
-    subtitle: { fontSize: 13, color: '#64748b' },
-    cards: { flex: 1, paddingHorizontal: 20, gap: 14 },
+    back: {
+        marginBottom: 12,
+    },
+    backText: {
+        color: COLORS.primary,
+        fontSize: 17,
+        fontWeight: '600',
+    },
+
+    deviceBar: UI.deviceBar,
+    deviceLeft: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        flex: 1,
+        marginRight: 12,
+    },
+    connDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        marginRight: 8,
+        backgroundColor: '#22c55e',
+    },
+    connText: {
+        fontSize: 13,
+        color: COLORS.text,
+        fontWeight: '600',
+    },
+    connId: {
+        fontSize: 10,
+        color: COLORS.muted,
+        marginTop: 1,
+    },
+    connStatus: {
+        fontSize: 12,
+        color: COLORS.success,
+        fontWeight: '600',
+    },
+
+    title: {
+        fontSize: 26,
+        fontWeight: '700',
+        color: COLORS.text,
+        marginBottom: 2,
+    },
+    subtitle: {
+        fontSize: 13,
+        color: COLORS.subtext,
+    },
+
+    cards: {
+        flex: 1,
+        paddingHorizontal: 20,
+        gap: 14,
+    },
     bigCard: {
-        flex: 1, backgroundColor: '#ffffff', borderRadius: 22,
-        padding: 24, alignItems: 'center', justifyContent: 'center',
-        borderWidth: 1,
-        shadowColor: '#000', shadowOpacity: 0.04,
-        shadowRadius: 8, shadowOffset: { width: 0, height: 2 }, elevation: 1,
+        ...UI.card,
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
     },
-    cardBlue: { borderColor: '#bfdbfe' },
-    cardGreen: { borderColor: '#bbf7d0' },
     bigIcon: {
-        width: 68, height: 68, borderRadius: 18,
-        alignItems: 'center', justifyContent: 'center', marginBottom: 14,
+        width: 68,
+        height: 68,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: 14,
+        backgroundColor: '#dbeafe',
+        borderWidth: 1,
+        borderColor: COLORS.primaryBorder,
     },
-    iconBlue: { backgroundColor: '#eff6ff' },
-    iconGreen: { backgroundColor: '#f0fdf4' },
-    bigIconText: { fontSize: 14, fontWeight: '800', letterSpacing: 1 },
-    iconBlueText: { color: '#2563eb' },
-    iconGreenText: { color: '#16a34a' },
-    bigTitle: { fontSize: 20, fontWeight: '700', color: '#0f172a', marginBottom: 6 },
-    bigDesc: { fontSize: 13, color: '#64748b', textAlign: 'center', lineHeight: 19 },
-    hint: { textAlign: 'center', padding: 20, fontSize: 12, color: '#94a3b8' },
+    bigIconText: {
+        fontSize: 14,
+        fontWeight: '800',
+        letterSpacing: 1,
+        color: COLORS.primary,
+    },
+    bigTitle: {
+        fontSize: 20,
+        fontWeight: '700',
+        color: COLORS.text,
+        marginBottom: 6,
+    },
+    bigDesc: {
+        fontSize: 13,
+        color: COLORS.subtext,
+        textAlign: 'center',
+        lineHeight: 19,
+    },
+
+    hint: {
+        textAlign: 'center',
+        padding: 20,
+        fontSize: 12,
+        color: COLORS.muted,
+    },
 });

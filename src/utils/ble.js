@@ -16,7 +16,7 @@ export const CMD_UPDATE_GREETING_ONLY = new Uint8Array([0xa9, 0x3c, 0xd1, 0x78])
 
 // ─── 协议常量 ────────────────────────────────────────────────────────────────
 export const COUNTER_BYTES = 2;
-export const CHUNK_SIZE = 128;
+export const CHUNK_SIZE = 128;``
 export const LOGIC_PACKET_SIZE = 256;
 
 export const PROFILE_LOGIC_PACKETS = 128;
@@ -29,8 +29,6 @@ export const GREETING_PACKETS = GREETING_LOGIC_PACKETS * 2;
 export const GREETING_BYTES_TOTAL = GREETING_LOGIC_PACKETS * LOGIC_PACKET_SIZE;
 
 // ─── 时间常量 ────────────────────────────────────────────────────────────────
-const PACKET_DELAY_MS = 0;
-const HALF_PACKET_DELAY_MS = 0;
 const RETRY_BACKOFF_MS = 10;
 const MAX_WRITE_RETRIES = 20;
 const STOP_WAIT_MS = 800;
@@ -45,6 +43,7 @@ export const getManager = () => {
 // ─── Permissions ─────────────────────────────────────────────────────────────
 export async function requestBlePermissions() {
     if (Platform.OS !== 'android') return true;
+
     const perms = [];
     if (Platform.Version >= 31) {
         perms.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN);
@@ -52,6 +51,7 @@ export async function requestBlePermissions() {
     } else {
         perms.push(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION);
     }
+
     const results = await PermissionsAndroid.requestMultiple(perms);
     return Object.values(results).every(v => v === PermissionsAndroid.RESULTS.GRANTED);
 }
@@ -60,16 +60,32 @@ export async function requestBlePermissions() {
 export function startScan(onDevice, onError) {
     const mgr = getManager();
     const seen = new Set();
-    mgr.startDeviceScan(null, { allowDuplicates: false }, (err, device) => {
-        if (err) { onError?.(err.message); return; }
-        if (!device) return;
-        const name = device.name || device.localName;
-        if (!name) return;
-        if (!seen.has(device.id)) {
-            seen.add(device.id);
-            onDevice(device);
+
+    mgr.startDeviceScan(
+        null,
+        {
+            allowDuplicates: false,
+            scanMode: Platform.OS === 'android' ? 2 : undefined,
+        },
+        (err, device) => {
+            if (err) {
+                onError?.(err.message);
+                return;
+            }
+            if (!device) return;
+
+            const displayName = (device.localName || device.name || '').trim();
+            if (!displayName) return;
+
+            if (!displayName.toLowerCase().includes('ebq meter')) return;
+
+            if (!seen.has(device.id)) {
+                seen.add(device.id);
+                onDevice(device);
+            }
         }
-    });
+    );
+
     return () => mgr.stopDeviceScan();
 }
 
@@ -77,28 +93,38 @@ export function startScan(onDevice, onError) {
 export async function connectDevice(deviceId, onDisconnect) {
     const mgr = getManager();
     mgr.stopDeviceScan();
+
     let device = await mgr.connectToDevice(deviceId, { timeout: 10000 });
     device = await device.discoverAllServicesAndCharacteristics();
+
     try {
+        // 改回 previous：只在 Android request MTU
         if (Platform.OS === 'android' && device.requestMTU) {
             device = await device.requestMTU(247);
         }
-    } catch (_) { /* ignore */ }
+    } catch (_) {
+        // ignore
+    }
 
     if (onDisconnect) {
         mgr.onDeviceDisconnected(deviceId, (err, disconnectedDevice) => {
             onDisconnect(err, disconnectedDevice);
         });
     }
+
     return device;
 }
 
 // ─── Disconnect ──────────────────────────────────────────────────────────────
 export async function disconnectDevice(device) {
-    try { await device?.cancelConnection(); } catch (_) { /* ignore */ }
+    try {
+        await device?.cancelConnection();
+    } catch (_) {
+        // ignore
+    }
 }
 
-// ─── Helpers (exported so Mode2Flow and others can import) ───────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 export function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -109,6 +135,7 @@ export function toBase64(bytes) {
 
 export async function findServiceUuidByCharacteristic(device, characteristicUuid) {
     const services = await device.services();
+
     for (const service of services) {
         const chars = await device.characteristicsForService(service.uuid);
         const found = chars.find(
@@ -116,17 +143,21 @@ export async function findServiceUuidByCharacteristic(device, characteristicUuid
         );
         if (found) return service.uuid;
     }
+
     throw new Error(`Characteristic not found: ${characteristicUuid}`);
 }
 
 async function writeBytes(device, serviceUuid, charUuid, bytes, withResponse = false) {
     const value = toBase64(bytes);
+
     if (withResponse) {
         return device.writeCharacteristicWithResponseForService(serviceUuid, charUuid, value);
     }
+
     return device.writeCharacteristicWithoutResponseForService(serviceUuid, charUuid, value);
 }
 
+// 改回 previous：packet 用 withResponse，iOS 比较稳
 export async function writeWithRetry(device, serviceUuid, charUuid, bytes, maxRetries = MAX_WRITE_RETRIES, debugLog) {
     for (let i = 0; i <= maxRetries; i++) {
         try {
@@ -153,11 +184,37 @@ export function buildPacket(counter, dataSlice) {
     return packet;
 }
 
-// ─── Main send function ───────────────────────────────────────────────────────
-export async function sendCombined(device, profileBytes, greetingBytes, onProgress, updateType = 'both') {
-    const ctrlServiceUuid = await findServiceUuidByCharacteristic(device, CHAR_UUID_CTRL);
-    const dataServiceUuid = await findServiceUuidByCharacteristic(device, CHAR_UUID_DATA);
+export async function cancelExistingConnection(deviceId) {
+    try {
+        const mgr = getManager();
+        const isConn = await mgr.isDeviceConnected(deviceId);
+        if (isConn) {
+            const devices = await mgr.connectedDevices([]);
+            const target = devices.find(d => d.id === deviceId);
+            if (target) await target.cancelConnection();
+        }
+    } catch (_) { }
+}
 
+// ─── Main send function ───────────────────────────────────────────────────────
+export async function sendCombined(device, profileBytes, greetingBytes, onProgress, updateType = 'both', cancelRef = null) {
+    console.log('[BLE][sendCombined] STEP A0: entered');
+    console.log('[BLE][sendCombined] STEP A1: updateType =', updateType);
+    console.log('[BLE][sendCombined] STEP A2: device.id =', device?.id);
+    console.log(
+        '[BLE][sendCombined] STEP A3: profileBytes =',
+        profileBytes?.length ?? null,
+        'greetingBytes =',
+        greetingBytes?.length ?? null
+    );
+
+    const ctrlServiceUuid = await findServiceUuidByCharacteristic(device, CHAR_UUID_CTRL);
+    console.log('[BLE][sendCombined] STEP A4: ctrlServiceUuid =', ctrlServiceUuid);
+
+    const dataServiceUuid = await findServiceUuidByCharacteristic(device, CHAR_UUID_DATA);
+    console.log('[BLE][sendCombined] STEP A5: dataServiceUuid =', dataServiceUuid);
+
+    console.log('[BLE][sendCombined] STEP B1: before CTRL monitor');
     const ctrlSubscription = device.monitorCharacteristicForService(
         ctrlServiceUuid,
         CHAR_UUID_CTRL,
@@ -166,74 +223,128 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
                 onProgress?.(null, null, null, null, `⚠️ CTRL error: ${err.message}`);
                 return;
             }
+            if (!characteristic?.value) return;
+
             const bytes = Buffer.from(characteristic.value, 'base64');
             const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
             const dec = Array.from(bytes).map(b => b.toString().padStart(3, ' ')).join(' ');
             const bin = Array.from(bytes).map(b => b.toString(2).padStart(8, '0')).join(' ');
+
             onProgress?.(null, null, null, null, `🔔 CTRL HEX: ${hex}`);
             onProgress?.(null, null, null, null, `🔔 CTRL DEC: ${dec}`);
             onProgress?.(null, null, null, null, `🔔 CTRL BIN: ${bin}`);
         }
     );
+    console.log('[BLE][sendCombined] STEP B2: after CTRL monitor');
 
     let dataSubscription = null;
 
     try {
+        // 改回 previous：加回 DATA monitor
         dataSubscription = device.monitorCharacteristicForService(
             dataServiceUuid,
             CHAR_UUID_DATA,
             (err, characteristic) => {
-                if (err) return;
+                if (err || !characteristic?.value) return;
                 const bytes = Buffer.from(characteristic.value, 'base64');
                 const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
                 onProgress?.(null, null, null, null, `🔔 DATA: ${hex}`);
             }
         );
+        console.log('[BLE][sendCombined] STEP C1: DATA monitor enabled');
 
         if (updateType === 'mode2') {
-            onProgress?.(null, null, null, null, `📤 Sending MODE2 command...`);
+            onProgress?.(null, null, null, null, '📤 Sending MODE2 command...');
+            console.log('[BLE][sendCombined] STEP D0: before MODE2 command');
             await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_MODE2, false);
+            console.log('[BLE][sendCombined] STEP D0A: after MODE2 command');
             await sleep(200);
-            onProgress?.(null, null, null, null, `📤 Sending START...`);
+
+            onProgress?.(null, null, null, null, '📤 Sending START...');
+            console.log('[BLE][sendCombined] STEP D1: before START write');
             await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_START, false);
-            await sleep(100);
+            console.log('[BLE][sendCombined] STEP D2: after START write');
+            await sleep(300);
+            console.log('[BLE][sendCombined] STEP D3: after START wait');
         } else if (updateType === 'profile') {
-            onProgress?.(null, null, null, null, `📤 Sending UPDATE PROFILE ONLY...`);
+            onProgress?.(null, null, null, null, '📤 Sending UPDATE PROFILE ONLY...');
+            console.log('[BLE][sendCombined] STEP D0: before UPDATE_PROFILE_ONLY');
             await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_UPDATE_PROFILE_ONLY, false);
+            console.log('[BLE][sendCombined] STEP D0A: after UPDATE_PROFILE_ONLY');
             await sleep(50);
+
+            console.log('[BLE][sendCombined] STEP D1: before START write');
             await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_START, false);
-            await sleep(100);
+            console.log('[BLE][sendCombined] STEP D2: after START write');
+            await sleep(300);
+            console.log('[BLE][sendCombined] STEP D3: after START wait');
         } else if (updateType === 'greeting') {
-            onProgress?.(null, null, null, null, `📤 Sending UPDATE GREETING ONLY...`);
+            onProgress?.(null, null, null, null, '📤 Sending UPDATE GREETING ONLY...');
+            console.log('[BLE][sendCombined] STEP D0: before UPDATE_GREETING_ONLY');
             await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_UPDATE_GREETING_ONLY, false);
+            console.log('[BLE][sendCombined] STEP D0A: after UPDATE_GREETING_ONLY');
             await sleep(50);
+
+            console.log('[BLE][sendCombined] STEP D1: before START write');
             await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_START, false);
-            await sleep(100);
+            console.log('[BLE][sendCombined] STEP D2: after START write');
+            await sleep(300);
+            console.log('[BLE][sendCombined] STEP D3: after START wait');
         } else {
-            onProgress?.(null, null, null, null, `📤 Sending START...`);
+            onProgress?.(null, null, null, null, '📤 Sending START...');
+            console.log('[BLE][sendCombined] STEP D1: before START write');
             await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_START, false);
-            await sleep(100);
+            console.log('[BLE][sendCombined] STEP D2: after START write');
+
+            // 改长一点给 iOS / peripheral 时间准备
+            await sleep(300);
+            console.log('[BLE][sendCombined] STEP D3: after START wait');
         }
 
-        const totalPackets = (profileBytes ? PROFILE_PACKETS : 0)
-            + (greetingBytes ? GREETING_PACKETS : 0);
+        const totalPackets =
+            (profileBytes ? PROFILE_PACKETS : 0) +
+            (greetingBytes ? GREETING_PACKETS : 0);
+
         let sent = 0;
         let lostCount = 0;
 
         const sendLogicPacket = async (baseCounter, logicData) => {
+            console.log('[BLE][sendLogicPacket] STEP E0: baseCounter =', baseCounter);
+
             const firstHalf = logicData.slice(0, CHUNK_SIZE);
             const secondHalf = logicData.slice(CHUNK_SIZE, LOGIC_PACKET_SIZE);
             const debugLog = (msg) => onProgress?.(null, null, null, null, msg);
 
             const t1 = Date.now();
             const packet1 = buildPacket(baseCounter, firstHalf);
+
+            console.log('[BLE][sendLogicPacket] STEP E1: before packet1 write ctr =', baseCounter);
             const { ok: ok1, attempts: attempts1 } = await writeWithRetry(
-                device, dataServiceUuid, CHAR_UUID_DATA, packet1, MAX_WRITE_RETRIES, debugLog
+                device,
+                dataServiceUuid,
+                CHAR_UUID_DATA,
+                packet1,
+                MAX_WRITE_RETRIES,
+                debugLog
             );
+            console.log(
+                '[BLE][sendLogicPacket] STEP E2: after packet1 write ctr =',
+                baseCounter,
+                'ok =',
+                ok1,
+                'attempts =',
+                attempts1
+            );
+
             const t2 = Date.now();
             if (!ok1) lostCount++;
             sent++;
-            onProgress?.(sent, totalPackets, baseCounter, packet1,
+
+            onProgress?.(
+                sent,
+                totalPackets,
+                baseCounter,
+                packet1,
                 ok1
                     ? (attempts1 > 1
                         ? `🔄 CTR:${baseCounter} OK after ${attempts1} retries (${t2 - t1}ms)`
@@ -242,13 +353,33 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
             );
 
             const packet2 = buildPacket(baseCounter + 1, secondHalf);
+            console.log('[BLE][sendLogicPacket] STEP E3: before packet2 write ctr =', baseCounter + 1);
             const { ok: ok2, attempts: attempts2 } = await writeWithRetry(
-                device, dataServiceUuid, CHAR_UUID_DATA, packet2, MAX_WRITE_RETRIES, debugLog
+                device,
+                dataServiceUuid,
+                CHAR_UUID_DATA,
+                packet2,
+                MAX_WRITE_RETRIES,
+                debugLog
             );
+            console.log(
+                '[BLE][sendLogicPacket] STEP E4: after packet2 write ctr =',
+                baseCounter + 1,
+                'ok =',
+                ok2,
+                'attempts =',
+                attempts2
+            );
+
             const t3 = Date.now();
             if (!ok2) lostCount++;
             sent++;
-            onProgress?.(sent, totalPackets, baseCounter + 1, packet2,
+
+            onProgress?.(
+                sent,
+                totalPackets,
+                baseCounter + 1,
+                packet2,
                 ok2
                     ? (attempts2 > 1
                         ? `🔄 CTR:${baseCounter + 1} OK after ${attempts2} retries (${t3 - t2}ms)`
@@ -257,9 +388,14 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
             );
         };
 
-        // Profile packets
         if (profileBytes) {
+            console.log('[BLE][sendCombined] STEP F1: begin profile transfer');
+
+            // 开始 profile 前再给一点 buffer
+            await sleep(200);
+
             for (let j = 0; j < PROFILE_LOGIC_PACKETS; j++) {
+                if (cancelRef?.current) throw new Error('Cancelled by user');
                 const baseCounter = j * 2;
                 const logicData = profileBytes.slice(
                     j * LOGIC_PACKET_SIZE,
@@ -267,12 +403,18 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
                 );
                 await sendLogicPacket(baseCounter, logicData);
             }
+
+            console.log('[BLE][sendCombined] STEP F2: profile transfer done');
             await sleep(20);
         }
 
-        // Greeting packets
         if (greetingBytes) {
+            console.log('[BLE][sendCombined] STEP G1: before greeting delay');
+            await sleep(500);
+            console.log('[BLE][sendCombined] STEP G2: begin greeting transfer');
+
             for (let j = 0; j < GREETING_LOGIC_PACKETS; j++) {
+                if (cancelRef?.current) throw new Error('Cancelled by user');
                 const baseCounter = GREETING_START_COUNTER + j * 2;
                 const logicData = greetingBytes.slice(
                     j * LOGIC_PACKET_SIZE,
@@ -280,20 +422,26 @@ export async function sendCombined(device, profileBytes, greetingBytes, onProgre
                 );
                 await sendLogicPacket(baseCounter, logicData);
             }
+
+            console.log('[BLE][sendCombined] STEP G3: greeting transfer done');
             await sleep(20);
         }
 
-        // STOP
-        onProgress?.(null, null, null, null, `📤 Sending STOP...`);
+        onProgress?.(null, null, null, null, '📤 Sending STOP...');
+        console.log('[BLE][sendCombined] STEP H1: before STOP');
         await writeBytes(device, ctrlServiceUuid, CHAR_UUID_CTRL, CMD_STOP, false);
+        console.log('[BLE][sendCombined] STEP H2: after STOP');
         await sleep(STOP_WAIT_MS);
 
-        onProgress?.(null, null, null, null,
-            `✅ Send complete. Lost: ${lostCount}/${totalPackets}`
-        );
-
+        onProgress?.(null, null, null, null, `✅ Send complete. Lost: ${lostCount}/${totalPackets}`);
+        console.log('[BLE][sendCombined] STEP H3: complete');
     } finally {
-        ctrlSubscription.remove();
-        dataSubscription?.remove();
+        console.log('[BLE][sendCombined] STEP Z: cleanup subscriptions');
+        try {
+            ctrlSubscription.remove();
+        } catch (_) { }
+        try {
+            dataSubscription?.remove();
+        } catch (_) { }
     }
 }

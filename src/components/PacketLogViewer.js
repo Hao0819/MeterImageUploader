@@ -2,8 +2,13 @@
 
 import React, { useRef } from 'react';
 import {
-    Modal, SafeAreaView, View, Text,
-    TouchableOpacity, ScrollView, StyleSheet,
+    Modal,
+    SafeAreaView,
+    View,
+    Text,
+    TouchableOpacity,
+    ScrollView,
+    StyleSheet,
 } from 'react-native';
 import {
     PAGE_COUNTER_RANGES,
@@ -36,7 +41,12 @@ export default function PacketLogViewer({ visible, onClose, packetLogs, sendStat
     ];
 
     return (
-        <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+        <Modal
+            visible={visible}
+            animationType="slide"
+            presentationStyle="pageSheet"
+            onRequestClose={onClose}
+        >
             <SafeAreaView style={lv.container}>
 
                 {/* Header */}
@@ -92,10 +102,14 @@ export default function PacketLogViewer({ visible, onClose, packetLogs, sendStat
                         )}
                         {p2CounterIssues.length > 0 && (
                             <Text style={lv.warnLine}>
-                                • {p2CounterIssues.length} packets outside expected counter range (256–511)
+                                • {p2CounterIssues.length} packets outside expected counter range
                             </Text>
                         )}
-                        <Text style={lv.warnNote}>P2 expected counters: 0x0100 – 0x01FF</Text>
+                        <Text style={lv.warnNote}>
+                            P2 expected: 0x{P2_COUNTER_START.toString(16).toUpperCase().padStart(4, '0')}
+                            {' – '}
+                            0x{(P2_COUNTER_START + IMAGE_LOGIC_PKTS * 2 - 1).toString(16).toUpperCase().padStart(4, '0')}
+                        </Text>
                     </View>
                 )}
 
@@ -118,33 +132,48 @@ export default function PacketLogViewer({ visible, onClose, packetLogs, sendStat
                             const pageRange = getPageForCounter(entry.counter);
                             const borderColor = pageRange?.color ?? '#e2e8f0';
                             const hasIssue = !entry.ok || entry.retries > 0;
+                            const mismatch =
+                                entry.pageId &&
+                                pageRange &&
+                                entry.pageId.toLowerCase() !== pageRange.id?.toLowerCase();
+
                             return (
                                 <View
-                                    key={i}
+                                    key={`${entry.pageId}-${entry.counter}-${i}`}
                                     style={[
                                         lv.logRow,
                                         { borderLeftColor: borderColor },
                                         hasIssue && lv.logRowWarn,
+                                        mismatch && lv.logRowMismatch,
                                     ]}
                                 >
                                     <Text style={lv.logNum}>{String(i + 1).padStart(4, '0')}</Text>
+
                                     <View style={lv.logBody}>
                                         <Text style={lv.logMeta}>
                                             <Text style={[lv.logPage, { color: borderColor }]}>
                                                 {entry.pageId?.toUpperCase() ?? '??'}
                                             </Text>
+
                                             {'  CTR:'}
                                             <Text style={lv.logCtr}>
                                                 {entry.counter.toString(16).toUpperCase().padStart(4, '0')}
                                                 {' '}({entry.counter})
                                             </Text>
+
                                             {entry.retries > 0 && (
                                                 <Text style={lv.logRetry}>{`  ⚠️ ${entry.retries} retry`}</Text>
                                             )}
+
                                             {!entry.ok && (
                                                 <Text style={lv.logFail}>{'  ❌ FAIL'}</Text>
                                             )}
+
+                                            {mismatch && (
+                                                <Text style={lv.logMismatch}>{'  ⚠️ PAGE MISMATCH'}</Text>
+                                            )}
                                         </Text>
+
                                         <Text style={lv.logHex}>{entry.hex}</Text>
                                     </View>
                                 </View>
@@ -160,12 +189,16 @@ export default function PacketLogViewer({ visible, onClose, packetLogs, sendStat
                         onPress={() => {
                             const firstP2Idx = packetLogs.findIndex(l => l.pageId === 'p2');
                             if (firstP2Idx >= 0 && scrollRef.current) {
-                                scrollRef.current.scrollTo({ y: firstP2Idx * 44, animated: true });
+                                scrollRef.current.scrollTo({
+                                    y: firstP2Idx * 60,
+                                    animated: true,
+                                });
                             }
                         }}
                     >
                         <Text style={lv.jumpTxt}>Jump to P2 ↓</Text>
                     </TouchableOpacity>
+
                     <TouchableOpacity
                         style={[lv.jumpBtn, { backgroundColor: '#475569' }]}
                         onPress={() => scrollRef.current?.scrollToEnd({ animated: true })}
@@ -181,64 +214,152 @@ export default function PacketLogViewer({ visible, onClose, packetLogs, sendStat
 
 const lv = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8fafc' },
+
     header: {
-        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-        padding: 16, borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e2e8f0',
         backgroundColor: '#fff',
     },
     closeBtn: { paddingHorizontal: 4 },
     closeTxt: { color: '#dc2626', fontSize: 14, fontWeight: '700' },
     headerTitle: { color: '#0f172a', fontSize: 15, fontWeight: '700' },
     headerCount: { color: '#64748b', fontSize: 12 },
+
     summaryBar: {
-        backgroundColor: '#f1f5f9', paddingVertical: 8, paddingHorizontal: 16,
-        borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
+        backgroundColor: '#f1f5f9',
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e2e8f0',
     },
     summaryTxt: { fontSize: 12, color: '#334155' },
-    statsScroll: { flexGrow: 0, backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
-    statsRow: { flexDirection: 'row', padding: 10, gap: 8 },
+
+    statsScroll: {
+        flexGrow: 0,
+        backgroundColor: '#fff',
+        borderBottomWidth: 1,
+        borderBottomColor: '#e2e8f0',
+    },
+    statsRow: {
+        flexDirection: 'row',
+        padding: 10,
+        gap: 8,
+    },
     statCard: {
-        alignItems: 'center', paddingVertical: 8, paddingHorizontal: 14,
-        borderRadius: 10, borderWidth: 2, backgroundColor: '#f8fafc', minWidth: 60,
+        alignItems: 'center',
+        paddingVertical: 8,
+        paddingHorizontal: 14,
+        borderRadius: 10,
+        borderWidth: 2,
+        backgroundColor: '#f8fafc',
+        minWidth: 60,
     },
     statLabel: { fontSize: 12, fontWeight: '700', marginBottom: 2 },
     statCount: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
     statStatus: { fontSize: 10, color: '#64748b', marginTop: 2 },
+
     warnBanner: {
-        backgroundColor: '#fef3c7', padding: 12,
-        borderBottomWidth: 1, borderBottomColor: '#fcd34d',
+        backgroundColor: '#fef3c7',
+        padding: 12,
+        borderBottomWidth: 1,
+        borderBottomColor: '#fcd34d',
     },
     warnTitle: { fontSize: 13, fontWeight: '700', color: '#92400e', marginBottom: 4 },
     warnLine: { fontSize: 12, color: '#92400e', marginBottom: 2 },
-    warnNote: { fontSize: 11, color: '#b45309', fontFamily: 'monospace', marginTop: 4 },
+    warnNote: {
+        fontSize: 11,
+        color: '#b45309',
+        fontFamily: 'monospace',
+        marginTop: 4,
+    },
+
     legendRow: {
-        flexDirection: 'row', gap: 12, paddingHorizontal: 12, paddingVertical: 8,
-        backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
+        flexDirection: 'row',
+        gap: 12,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        backgroundColor: '#fff',
+        borderBottomWidth: 1,
+        borderBottomColor: '#e2e8f0',
     },
     legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     legendDot: { width: 8, height: 8, borderRadius: 4 },
     legendTxt: { fontSize: 11, color: '#334155', fontWeight: '600' },
+
     logScroll: { flex: 1 },
-    emptyTxt: { color: '#94a3b8', fontSize: 13, textAlign: 'center', marginTop: 32, fontStyle: 'italic' },
-    logRow: {
-        flexDirection: 'row', alignItems: 'flex-start',
-        paddingVertical: 5, paddingHorizontal: 8,
-        borderBottomWidth: 1, borderBottomColor: '#f1f5f9',
-        borderLeftWidth: 3, borderLeftColor: '#e2e8f0',
+    emptyTxt: {
+        color: '#94a3b8',
+        fontSize: 13,
+        textAlign: 'center',
+        marginTop: 32,
+        fontStyle: 'italic',
     },
-    logRowWarn: { backgroundColor: '#fff7ed' },
-    logNum: { color: '#94a3b8', fontSize: 10, fontFamily: 'monospace', width: 36, marginRight: 6, marginTop: 1, lineHeight: 16 },
+
+    logRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-start',
+        paddingVertical: 5,
+        paddingHorizontal: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f1f5f9',
+        borderLeftWidth: 3,
+        borderLeftColor: '#e2e8f0',
+        backgroundColor: '#fff',
+    },
+    logRowWarn: {
+        backgroundColor: '#fff7ed',
+    },
+    logRowMismatch: {
+        backgroundColor: '#fef2f2',
+    },
+
+    logNum: {
+        color: '#94a3b8',
+        fontSize: 10,
+        fontFamily: 'monospace',
+        width: 36,
+        marginRight: 6,
+        marginTop: 1,
+        lineHeight: 16,
+    },
     logBody: { flex: 1 },
-    logMeta: { fontSize: 11, fontFamily: 'monospace', lineHeight: 16, marginBottom: 1 },
+
+    logMeta: {
+        fontSize: 11,
+        fontFamily: 'monospace',
+        lineHeight: 16,
+        marginBottom: 1,
+    },
     logPage: { fontWeight: '700', fontSize: 11 },
     logCtr: { color: '#334155' },
     logRetry: { color: '#d97706', fontWeight: '600' },
     logFail: { color: '#dc2626', fontWeight: '700' },
-    logHex: { fontSize: 10, color: '#64748b', fontFamily: 'monospace', lineHeight: 15 },
-    footer: {
-        flexDirection: 'row', gap: 10, padding: 12,
-        borderTopWidth: 1, borderTopColor: '#e2e8f0', backgroundColor: '#fff',
+    logMismatch: { color: '#b91c1c', fontWeight: '700' },
+
+    logHex: {
+        fontSize: 10,
+        color: '#64748b',
+        fontFamily: 'monospace',
+        lineHeight: 15,
     },
-    jumpBtn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+
+    footer: {
+        flexDirection: 'row',
+        gap: 10,
+        padding: 12,
+        borderTopWidth: 1,
+        borderTopColor: '#e2e8f0',
+        backgroundColor: '#fff',
+    },
+    jumpBtn: {
+        flex: 1,
+        paddingVertical: 10,
+        borderRadius: 10,
+        alignItems: 'center',
+    },
     jumpTxt: { color: '#fff', fontWeight: '700', fontSize: 13 },
 });
